@@ -1,0 +1,77 @@
+service: okta-hooks
+
+provider:
+  name: aws
+  runtime: nodejs10.x
+  stage: production
+  region: us-east-1
+  environment: ${file(serverless/environment.js)}
+  $<<: ${file(serverless/provider.js)}
+
+package:
+  exclude:
+    - .serverless/**
+    - .webpack/**
+    - .git/**
+    - test/**
+    - '**/*.test.js'
+    - '**/*.sql'
+    - .deployment/**
+
+plugins:
+  - '@cruglobal/serverless-merge-config'
+  - serverless-webpack
+
+custom:
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules: true
+    packager: yarn
+
+resources:
+  Resources:
+    IamRoleLambdaExecution:
+      Properties:
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaENIManagementAccess
+
+    APILoadBalancer:
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties:
+        Name: okta-hooks-production-alb
+        Type: application
+        Scheme: internet-facing
+        IpAddressType: ipv4
+        SecurityGroups:
+          - ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.webapp_elb_sg}
+        Subnets: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_public_1_all}
+        LoadBalancerAttributes:
+          - Key: access_logs.s3.enabled
+            Value: true
+          - Key: access_logs.s3.bucket
+            Value: cru-alb-logs
+          - Key: access_logs.s3.prefix
+            Value: okta-hooks/production
+
+    APILoadBalancerListener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties:
+        LoadBalancerArn:
+          Ref: APILoadBalancer
+        Certificates:
+          - CertificateArn: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.cru_wildcard_ssl}
+        DefaultActions:
+          - Type: fixed-response
+            Order: 1
+            FixedResponseConfig:
+              StatusCode: 404
+              ContentType: application/json
+              MessageBody: '{"error": "Not Found"}'
+        Port: 443
+        Protocol: HTTPS
+
+  Outputs:
+    LoadBalancer:
+      Value:
+        Fn::GetAtt: [APILoadBalancer, DNSName]
