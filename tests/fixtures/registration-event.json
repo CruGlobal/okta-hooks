@@ -1,0 +1,28 @@
+{
+  "requestContext": {
+    "elb": {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:056154071827:targetgroup/730bd7e0f9be8b151f4aca91f1a15c16/6d88df0af6dd6f1e"
+    }
+  },
+  "httpMethod": "POST",
+  "path": "/registration",
+  "queryStringParameters": {},
+  "headers": {
+    "accept": "application/json",
+    "authorization": "w4Nw^Zl*zHCDX&&L7Q!16PN6UeR*uAc4KkxA$0fiM$9xS26R&z9wOwXd4ykEWJR&",
+    "cache-control": "no-cache",
+    "connection": "keep-alive",
+    "content-length": "558",
+    "content-type": "application/json",
+    "host": "okta-hooks-preview.cru.org",
+    "pragma": "no-cache",
+    "user-agent": "Okta-Integrations",
+    "x-amzn-trace-id": "Root=1-5daf3b2e-76b4c288af5ab194db0ed13a",
+    "x-forwarded-for": "34.194.59.11",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https",
+    "x-okta-request-id": "Xa87Lk0UCZ2i524oTJp@IgAABzM"
+  },
+  "body": "{\"eventId\":\"DJGRAhygSiO4-4q_jTVuCQ\",\"eventTime\":\"2019-10-22T17:23:58.000Z\",\"eventType\":\"com.okta.user.pre-registration\",\"eventTypeVersion\":\"1.0\",\"contentType\":\"application/json\",\"cloudEventVersion\":\"0.1\",\"source\":\"regnosocbrTqQ9Fbg0h7\",\"data\":{\"context\":{\"request\":{\"id\":\"Xa87Lk0UCZ2i524oTJp@IgAABzM\",\"method\":\"POST\",\"url\":{\"value\":\"/api/v1/registration/regnosocbrTqQ9Fbg0h7/register\"},\"ipAddress\":\"8.10.140.190\"}},\"userProfile\":{\"lastName\":\"Stark\",\"firstName\":\"Tony\",\"login\":\"ironman@stark.com\",\"email\":\"ironman@stark.com\"},\"action\":null}}",
+  "isBase64Encoded": false
+}

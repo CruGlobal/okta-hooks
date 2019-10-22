@@ -2,7 +2,9 @@
 
 # Set PROJECT_NAME and ENVIRONMENT for testing/demo
 export PROJECT_NAME=okta-hooks
-export ENVIRONMENT=production
+if [[ -z "${ENVIRONMENT}" ]]; then
+  export ENVIRONMENT=staging
+fi
 
 # Export environment variables for use with serverless
 source $ECS_CONFIG/bin/load_environment.sh

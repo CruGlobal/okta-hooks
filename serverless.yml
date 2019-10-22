@@ -2,11 +2,18 @@ service: okta-hooks
 
 provider:
   name: aws
+  stage: ${env:ENVIRONMENT}
   runtime: nodejs10.x
-  stage: production
   region: us-east-1
+  vpc:
+    securityGroupIds:
+      - ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.webapp_elb_sg}
+    subnetIds: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_apps_1_all}
+  stackTags:
+    owner: apps@cru.org
+    application: ${env:PROJECT_NAME}
+    env: ${env:ENVIRONMENT}
   environment: ${file(serverless/environment.js)}
-  $<<: ${file(serverless/provider.js)}
 
 package:
   exclude:
@@ -36,10 +43,10 @@ resources:
           - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
           - arn:aws:iam::aws:policy/service-role/AWSLambdaENIManagementAccess
 
-    APILoadBalancer:
+    OktaLoadBalancer:
       Type: AWS::ElasticLoadBalancingV2::LoadBalancer
       Properties:
-        Name: okta-hooks-production-alb
+        Name: okta-hooks-${env:ENVIRONMENT}-alb
         Type: application
         Scheme: internet-facing
         IpAddressType: ipv4
@@ -52,13 +59,13 @@ resources:
           - Key: access_logs.s3.bucket
             Value: cru-alb-logs
           - Key: access_logs.s3.prefix
-            Value: okta-hooks/production
+            Value: okta-hooks/${env:ENVIRONMENT}
 
-    APILoadBalancerListener:
+    OktaLoadBalancerListener:
       Type: AWS::ElasticLoadBalancingV2::Listener
       Properties:
         LoadBalancerArn:
-          Ref: APILoadBalancer
+          Ref: OktaLoadBalancer
         Certificates:
           - CertificateArn: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.cru_wildcard_ssl}
         DefaultActions:
@@ -74,4 +81,35 @@ resources:
   Outputs:
     LoadBalancer:
       Value:
-        Fn::GetAtt: [APILoadBalancer, DNSName]
+        Fn::GetAtt: [OktaLoadBalancer, DNSName]
+
+functions:
+#  verification:
+#    handler: hooks/verification.handler
+#    events:
+#      - alb:
+#          listenerArn:
+#            Ref: OktaLoadBalancerListener
+#          priority: 1
+#          conditions:
+#            method:
+#              - GET
+
+  registration:
+    handler: hooks/inline/registration.handler
+    memorySize: 128
+    timeout: 5
+    description: Registration hook to generate a new GUID.
+    events:
+      - alb:
+          listenerArn:
+            Ref: OktaLoadBalancerListener
+          priority: 1
+          conditions:
+            header:
+              name: Authorization
+              values:
+                - ${env:OKTA_SHARED_SECRET}
+            method:
+              - POST
+            path: /registration
