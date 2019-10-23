@@ -13,6 +13,13 @@ provider:
     owner: apps@cru.org
     application: ${env:PROJECT_NAME}
     env: ${env:ENVIRONMENT}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - SNS:Publish
+        - SNS:Subscribe
+      Resource:
+        Ref: OktaEventsSNSTopic
   environment: ${file(serverless/environment.js)}
 
 package:
@@ -72,29 +79,41 @@ resources:
           - Type: fixed-response
             Order: 1
             FixedResponseConfig:
-              StatusCode: 404
+              StatusCode: 403
               ContentType: application/json
-              MessageBody: '{"error": "Not Found"}'
+              MessageBody: '{"error": "Forbidden"}'
         Port: 443
         Protocol: HTTPS
 
-  Outputs:
-    LoadBalancer:
-      Value:
-        Fn::GetAtt: [OktaLoadBalancer, DNSName]
+    VerificationAlbListenerRule2:
+      Properties:
+        # serverless framework only allows a single header condition, we handle all verification conditions here
+        Conditions:
+          - Field: path-pattern
+            Values:
+              - /events
+          - Field: http-request-method
+            HttpRequestMethodConfig:
+              Values:
+                - GET
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: Authorization
+              Values:
+                - ${env:OKTA_SHARED_SECRET}
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: X-Okta-Verification-Challenge
+              Values:
+                - ?*
+
+    OktaEventsSNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: Okta Events
+        TopicName: okta-lifecycle-events
 
 functions:
-#  verification:
-#    handler: hooks/verification.handler
-#    events:
-#      - alb:
-#          listenerArn:
-#            Ref: OktaLoadBalancerListener
-#          priority: 1
-#          conditions:
-#            method:
-#              - GET
-
   registration:
     handler: hooks/inline/registration.handler
     memorySize: 128
@@ -113,3 +132,35 @@ functions:
             method:
               - POST
             path: /registration
+  verification:
+    handler: hooks/event/verification.handler
+    memorySize: 128
+    timeout: 5
+    description: Event hook Verification
+    events:
+      - alb:
+          listenerArn:
+            Ref: OktaLoadBalancerListener
+          priority: 2
+          conditions: {} # conditions are handled in Resources block for verification lambda
+  events:
+    handler: hooks/event/events.handler
+    memorySize: 512
+    timeout: 30
+    description: Event hook for all okta events
+    environment:
+      SNS_OKTA_EVENTS_ARN:
+        Ref: OktaEventsSNSTopic
+    events:
+      - alb:
+          listenerArn:
+            Ref: OktaLoadBalancerListener
+          priority: 3
+          conditions:
+            header:
+              name: Authorization
+              values:
+                - ${env:OKTA_SHARED_SECRET}
+            method:
+              - POST
+            path: /events
