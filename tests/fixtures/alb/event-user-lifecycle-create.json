@@ -1,0 +1,25 @@
+{
+  "requestContext": {
+    "elb": {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:056154071827:targetgroup/0a4944cdaa5909f7cd0c20bb7687cae0/74b1ab561a137f5c"
+    }
+  },
+  "httpMethod": "POST",
+  "path": "/events",
+  "queryStringParameters": {},
+  "headers": {
+    "accept": "application/json",
+    "authorization": "w4Nw^Zl*zHCDX&&L7Q!16PN6UeR*uAc4KkxA$0fiM$9xS26R&z9wOwXd4ykEWJR&",
+    "connection": "keep-alive",
+    "content-length": "1162",
+    "content-type": "application/json",
+    "host": "okta-hooks-preview.cru.org",
+    "user-agent": "Okta Hook Service v1.0.0 - whoo0erni6PIVagJY0h7",
+    "x-amzn-trace-id": "Root=1-5db1b371-7d05aa43c92cabb960387958",
+    "x-forwarded-for": "34.200.8.251",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https"
+  },
+  "body": "{\"eventType\":\"com.okta.event_hook\",\"eventTypeVersion\":\"1.0\",\"cloudEventsVersion\":\"0.1\",\"source\":\"https://cru.oktapreview.com/api/v1/eventHooks/whoo0erni6PIVagJY0h7\",\"eventId\":\"6e08cca5-9488-4367-b75b-e0bb1c973c58\",\"data\":{\"events\":[{\"uuid\":\"9191ef7a-f669-11e9-b9b3-fd3a55cb1b10\",\"published\":\"2019-10-24T14:21:28.577Z\",\"eventType\":\"user.lifecycle.create\",\"version\":\"0\",\"displayMessage\":\"Create okta user\",\"severity\":\"INFO\",\"client\":{\"ipChain\":[]},\"actor\":{\"id\":\"sprnatyt09a3WRgoL0h7\",\"type\":\"SystemPrincipal\",\"alternateId\":\"system@okta.com\",\"displayName\":\"Okta System\"},\"outcome\":{\"result\":\"SUCCESS\"},\"target\":[{\"id\":\"00uo1r94r6jIYXcjy0h7\",\"type\":\"User\",\"alternateId\":\"ironman@stark.com\",\"displayName\":\"Iron Man\"}],\"transaction\":{\"id\":\"unknown\",\"detail\":{}},\"debugContext\":{\"debugData\":{\"requestUri\":\"/api/v1/registration/regnosocbrTqQ9Fbg0h7/register\",\"targetEventHookIds\":\"whoo0erni6PIVagJY0h7\"}},\"legacyEventType\":\"core.user.config.user_creation.success\",\"authenticationContext\":{\"authenticationStep\":0,\"externalSessionId\":\"trslQYwh4qUTBOPe97OKdcQZw\"},\"securityContext\":{}}]},\"eventTime\":\"2019-10-24T14:21:37.009Z\",\"contentType\":\"application/json\"}",
+  "isBase64Encoded": false
+}

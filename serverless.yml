@@ -145,8 +145,8 @@ functions:
           conditions: {} # conditions are handled in Resources block for verification lambda
   events:
     handler: hooks/event/events.handler
-    memorySize: 512
-    timeout: 30
+    memorySize: 128
+    timeout: 5
     description: Event hook for all okta events
     environment:
       SNS_OKTA_EVENTS_ARN:
@@ -164,3 +164,15 @@ functions:
             method:
               - POST
             path: /events
+  userLifecycleCreate:
+    handler: sns/user/lifecycle/create.handler
+    description: Handle all `user.lifecycle.create` okta events
+    memorySize: 256
+    timeout: 6
+    events:
+      - sns:
+          arn: !Ref OktaEventsSNSTopic
+          topicName: okta-lifecycle-events
+          filterPolicy:
+            eventType:
+              - user.lifecycle.create

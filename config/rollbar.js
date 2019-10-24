@@ -9,7 +9,14 @@ const rollbar = new Rollbar({
   // Enable rollbar on staging and production
   enabled: includes(['staging', 'production'], process.env['ENVIRONMENT']),
   payload: {
-    environment: process.env['ENVIRONMENT']
+    environment: process.env['ENVIRONMENT'],
+    client: {
+      javascript: {
+        source_map_enabled: true,
+        code_version: process.env['SOURCEMAP_VERSION'],
+        guess_uncaught_frames: true
+      }
+    }
   }
 })
 

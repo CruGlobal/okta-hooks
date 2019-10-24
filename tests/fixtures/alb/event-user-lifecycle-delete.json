@@ -1,0 +1,25 @@
+{
+  "requestContext": {
+    "elb": {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:056154071827:targetgroup/0a4944cdaa5909f7cd0c20bb7687cae0/74b1ab561a137f5c"
+    }
+  },
+  "httpMethod": "POST",
+  "path": "/events",
+  "queryStringParameters": {},
+  "headers": {
+    "accept": "application/json",
+    "authorization": "w4Nw^Zl*zHCDX&&L7Q!16PN6UeR*uAc4KkxA$0fiM$9xS26R&z9wOwXd4ykEWJR&",
+    "connection": "keep-alive",
+    "content-length": "1875",
+    "content-type": "application/json",
+    "host": "okta-hooks-preview.cru.org",
+    "user-agent": "Okta Hook Service v1.0.0 - whoo0erni6PIVagJY0h7",
+    "x-amzn-trace-id": "Root=1-5db1e044-8210502010c7b189f944f9b5",
+    "x-forwarded-for": "34.200.8.251",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https"
+  },
+  "body": "{\"eventType\":\"com.okta.event_hook\",\"eventTypeVersion\":\"1.0\",\"cloudEventsVersion\":\"0.1\",\"source\":\"https://cru.oktapreview.com/api/v1/eventHooks/whoo0erni6PIVagJY0h7\",\"eventId\":\"8bee3f0f-5866-4c48-b1cb-7fc2308e4b4d\",\"data\":{\"events\":[{\"uuid\":\"4b9e1d8f-f684-11e9-ad48-d37548da8f9c\",\"published\":\"2019-10-24T17:32:47.628Z\",\"eventType\":\"user.lifecycle.delete.initiated\",\"version\":\"0\",\"displayMessage\":\"Delete Okta user initiated\",\"severity\":\"INFO\",\"client\":{\"userAgent\":{\"rawUserAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.70 Safari/537.36\",\"os\":\"Mac OS X\",\"browser\":\"CHROME\"},\"zone\":\"null\",\"device\":\"Computer\",\"ipAddress\":\"8.10.140.190\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"ipChain\":[{\"ip\":\"8.10.140.190\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"version\":\"V4\"}]},\"actor\":{\"id\":\"00unauiasg2CILBBx0h7\",\"type\":\"User\",\"alternateId\":\"steve.rogers@avengers.org\",\"displayName\":\"Captain America\"},\"outcome\":{\"result\":\"SUCCESS\"},\"target\":[{\"id\":\"00uo11p6k5JASvMVI0h7\",\"type\":\"User\",\"alternateId\":\"tony.stark@avengers.org\",\"displayName\":\"Iron Man\"}],\"transaction\":{\"type\":\"WEB\",\"id\":\"XbHgP-OT7cn8YM13gzo6nAAABBw\",\"detail\":{}},\"debugContext\":{\"debugData\":{\"requestId\":\"XbHgP-OT7cn8YM13gzo6nAAABBw\",\"requestUri\":\"/api/v1/users/00uo11p6k5JASvMVI0h7\",\"targetEventHookIds\":\"whoo0erni6PIVagJY0h7\",\"url\":\"/api/v1/users/00uo11p6k5JASvMVI0h7?\"}},\"legacyEventType\":\"core.user.config.user_status.delete.initiated\",\"authenticationContext\":{\"authenticationStep\":0,\"externalSessionId\":\"102cCKxMjTyRdW-Zg_j55CpYg\"},\"securityContext\":{}}]},\"eventTime\":\"2019-10-24T17:32:52.958Z\",\"contentType\":\"application/json\"}",
+  "isBase64Encoded": false
+}
