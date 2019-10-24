@@ -1,5 +1,4 @@
 import merge from 'lodash/merge'
-import isEmpty from 'lodash/isEmpty'
 
 export const COMMAND_USER_PROFILE_UPDATE = 'com.okta.user.profile.update'
 export const COMMAND_ACTION_UPDATE = 'com.okta.action.update'
