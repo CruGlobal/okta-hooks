@@ -23,6 +23,7 @@
     "@types/jest": "^24.0.15",
     "babel-jest": "^24.9.0",
     "babel-plugin-source-map-support": "^2.1.1",
+    "coveralls": "^3.0.7",
     "dotenv": "^8.0.0",
     "jest": "^24.8.0",
     "rollbar-sourcemap-webpack-plugin": "^2.5.1",
