@@ -56,7 +56,7 @@ describe('registration hook', () => {
             locationType: 'body',
             location: 'data.userProfile.email',
             domain: 'end-user',
-            errorSummary: 'You specified a restricted email domain. Please contact <a href="mailto:help@cru.org">help@cru.org</a> to set-up this account.',
+            errorSummary: 'You specified a restricted email domain. Please contact help@cru.org to set-up this account.',
             reason: 'RESTRICTED_EMAIL_DOMAIN'
           }]
         }

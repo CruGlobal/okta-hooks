@@ -11,7 +11,7 @@ export const handler = async (lambdaEvent) => {
     if (await RestrictedDomain.isRestricted(registration.email)) {
       response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'DENY' })
       response.addError({
-        errorSummary: 'You specified a restricted email domain. Please contact <a href="mailto:help@cru.org">help@cru.org</a> to set-up this account.',
+        errorSummary: 'You specified a restricted email domain. Please contact help@cru.org to set-up this account.',
         reason: 'RESTRICTED_EMAIL_DOMAIN',
         location: 'data.userProfile.email'
       })
