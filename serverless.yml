@@ -41,6 +41,7 @@ custom:
     webpackConfig: ./webpack.config.js
     includeModules: true
     packager: yarn
+    excludeFiles: '**/*.test.js'
 
 resources:
   Resources:
@@ -111,7 +112,7 @@ resources:
       Type: AWS::SNS::Topic
       Properties:
         DisplayName: Okta Events
-        TopicName: okta-lifecycle-events
+        TopicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
 
 functions:
   registration:
@@ -172,7 +173,7 @@ functions:
     events:
       - sns:
           arn: !Ref OktaEventsSNSTopic
-          topicName: okta-lifecycle-events
+          topicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
           filterPolicy:
             eventType:
               - user.lifecycle.create
