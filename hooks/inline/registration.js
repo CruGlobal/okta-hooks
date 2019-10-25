@@ -23,7 +23,7 @@ export const handler = async (lambdaEvent) => {
     return response.toALBResponse()
   } catch (error) {
     // Log error to rollbar
-    rollbar.error('registration hook Error', error, { lambdaEvent })
+    await rollbar.error('registration hook Error', error, { lambdaEvent })
     // Return success to okta, `user.lifecycle.create` event hook will add a GUID if necessary
     return new HookResponse({ statusCode: 204 }).toALBResponse()
   }
