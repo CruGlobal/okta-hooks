@@ -46,6 +46,10 @@ describe('registration hook', () => {
         'Content-Type': 'application/json; charset=utf-8'
       },
       body: JSON.stringify({
+        commands: [{
+          type: 'com.okta.action.update',
+          value: { registration: 'DENY' }
+        }],
         error: {
           errorSummary: 'Errors were found in the user profile',
           errorCauses: [{

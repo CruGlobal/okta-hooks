@@ -1,4 +1,4 @@
-import HookResponse, { COMMAND_USER_PROFILE_UPDATE } from '../../models/hook-response'
+import HookResponse, { COMMAND_ACTION_UPDATE, COMMAND_USER_PROFILE_UPDATE } from '../../models/hook-response'
 import GUID from '../../models/guid'
 import rollbar from '../../config/rollbar'
 import RestrictedDomain from '../../models/restricted-domain'
@@ -9,6 +9,7 @@ export const handler = async (lambdaEvent) => {
     const response = new HookResponse()
     const registration = new RegistrationRequest(lambdaEvent.body)
     if (await RestrictedDomain.isRestricted(registration.email)) {
+      response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'DENY' })
       response.addError({
         errorSummary: 'You specified a restricted email domain. Please contact <a href="mailto:help@cru.org">help@cru.org</a> to set-up this account.',
         reason: 'RESTRICTED_EMAIL_DOMAIN',
