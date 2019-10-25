@@ -114,12 +114,27 @@ resources:
         DisplayName: Okta Events
         TopicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
 
+    OktaRestrictedDomainsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${env:ENVIRONMENT}-restricted-domains
+        AttributeDefinitions:
+          - AttributeName: DomainName
+            AttributeType: S
+        KeySchema:
+          - AttributeName: DomainName
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
 functions:
   registration:
     handler: hooks/inline/registration.handler
     memorySize: 128
     timeout: 5
-    description: Registration hook to generate a new GUID.
+    description: Registration hook to generate a new GUID and prevent signup with restricted domain.
+    environment:
+      DYNAMODB_RESTRICTED_DOMAINS:
+        Ref: OktaRestrictedDomainsTable
     events:
       - alb:
           listenerArn:
