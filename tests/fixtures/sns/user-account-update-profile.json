@@ -1,0 +1,26 @@
+{
+  "Records": [
+    {
+      "EventVersion": "1.0",
+      "EventSubscriptionArn": "arn:aws:sns:us-east-2:123456789012:sns-lambda:21be56ed-a058-49f5-8c98-aedd2564c486",
+      "EventSource": "aws:sns",
+      "Sns": {
+        "Type": "Notification",
+        "MessageId": "b4ab21d9-5d0b-5e5c-816c-77e86bbaf373",
+        "TopicArn": "arn:aws:sns:us-east-1:056154071827:okta-hooks-staging-lifecycle-events",
+        "Message": "{\"uuid\":\"69d47726-f9b1-11e9-b9b3-fd3a55cb1b10\",\"published\":\"2019-10-28T18:33:19.157Z\",\"eventType\":\"user.account.update_profile\",\"version\":\"0\",\"displayMessage\":\"Update user profile for Okta\",\"severity\":\"INFO\",\"client\":{\"userAgent\":{\"rawUserAgent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.70 Safari/537.36\",\"os\":\"Mac OS X\",\"browser\":\"CHROME\"},\"zone\":\"null\",\"device\":\"Computer\",\"ipAddress\":\"8.10.140.190\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"ipChain\":[{\"ip\":\"8.10.140.190\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"version\":\"V4\"}]},\"actor\":{\"id\":\"00unft3x8nkKs11ZP0h7\",\"type\":\"User\",\"alternateId\":\"clint.barton@avengers.org\",\"displayName\":\"Clint Barton\"},\"outcome\":{\"result\":\"SUCCESS\"},\"target\":[{\"id\":\"00uo48gsq4ujEWoXJ0h7\",\"type\":\"User\",\"alternateId\":\"ronin@avengers.org\",\"displayName\":\"Ronin\"}],\"transaction\":{\"type\":\"WEB\",\"id\":\"Xbc0boVqmljKcL54yvHwUAAABQQ\",\"detail\":{}},\"debugContext\":{\"debugData\":{\"requestId\":\"Xbc0boVqmljKcL54yvHwUAAABQQ\",\"requestUri\":\"/api/v1/users/00uo48gsq4ujEWoXJ0h7\",\"changedAttributes\":\"login\",\"targetEventHookIds\":\"whoo0erni6PIVagJY0h7\",\"url\":\"/api/v1/users/00uo48gsq4ujEWoXJ0h7?\"}},\"legacyEventType\":\"core.user.config.profile_update.success\",\"authenticationContext\":{\"authenticationStep\":0,\"externalSessionId\":\"102lmCK3bBRQe6-YejpQn-EEA\"},\"securityContext\":{}}",
+        "Timestamp": "2019-10-28T18:33:21.507Z",
+        "SignatureVersion": "1",
+        "Signature": "KJlyTO4OeVw7fhsu05R0i7FZ6uKo5bjc+Ml3WDSZINWaVT+BaXDSeqSkQFR6+9ukrq8Uj3NR3bZjRt1/egiPMWoFtrnpbNYM8jQfh50G27wZpKPTGUR9otOAxeXSWGTqbUayJihlObCgiHQwiyt84qox6f9yLiBb5lSPFIXb+c/BlhT0Ote0Ry4w6G/RjIQVm7twZKFyYHY4B0XdfJSowW9TRAFxAzgT4TJHZvnLRyFXxwVzZU87NZBMuTA5b8bddn2P7mFZ18QdQNvOFaOlRlrKAi8188O+X6l+B3w+aQcxYyqzSs5enhhiMV7whZ/VpNH2+idx4E2R3rvYlSvj/w==",
+        "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-6aad65c2f9911b05cd53efda11f913f9.pem",
+        "UnsubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:056154071827:okta-hooks-staging-lifecycle-events:e8d19a59-eb53-419d-a6a4-46fc4fbc7da8",
+        "MessageAttributes": {
+          "eventType": {
+            "Type": "String",
+            "Value": "user.account.update_profile"
+          }
+        }
+      }
+    }
+  ]
+}
