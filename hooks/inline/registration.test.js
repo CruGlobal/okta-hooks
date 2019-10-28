@@ -1,7 +1,7 @@
 import { handler } from './registration'
 import GUID from '../../models/guid'
 import rollbar from '../../config/rollbar'
-import RestrictedDomain from '../../models/restricted-domain'
+import RestrictedDomains from '../../models/restricted-domains'
 
 jest.mock('../../config/rollbar')
 
@@ -14,9 +14,9 @@ describe('registration hook', () => {
 
   it('should respond with command to add `theKeyGuid` profile attribute', async () => {
     jest.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
-    jest.spyOn(RestrictedDomain, 'isRestricted').mockResolvedValue(false)
+    jest.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
     const response = await handler(registrationEvent)
-    expect(RestrictedDomain.isRestricted).toHaveBeenCalledWith('tony.stark@avengers.org')
+    expect(RestrictedDomains.isRestricted).toHaveBeenCalledWith('tony.stark@avengers.org')
     expect(GUID.create).toHaveBeenCalled()
     expect(response).toStrictEqual({
       statusCode: 200,
@@ -35,9 +35,9 @@ describe('registration hook', () => {
   })
 
   it('should return an error when email is restricted', async () => {
-    jest.spyOn(RestrictedDomain, 'isRestricted').mockResolvedValue(true)
+    jest.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
     const response = await handler(registrationEvent)
-    expect(RestrictedDomain.isRestricted).toHaveBeenCalledWith('tony.stark@avengers.org')
+    expect(RestrictedDomains.isRestricted).toHaveBeenCalledWith('tony.stark@avengers.org')
     expect(response).toStrictEqual({
       statusCode: 200,
       statusDescription: '200 OK',

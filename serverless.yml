@@ -202,3 +202,15 @@ functions:
           filterPolicy:
             eventType:
               - user.lifecycle.create
+  importRestrictedDomains:
+    handler: schedule/import-restricted-domains.handler
+    description: Import list of restricted domains from Google Drive
+    memorySize: 1024
+    timeout: 120
+    environment:
+      DYNAMODB_RESTRICTED_DOMAINS:
+        Ref: OktaRestrictedDomainsTable
+    events:
+      - schedule:
+          # Run daily at 12:00a and 12:00p UTC
+          rate: cron(0 0,12 * * ? *)
