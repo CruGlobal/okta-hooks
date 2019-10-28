@@ -202,9 +202,9 @@ functions:
           filterPolicy:
             eventType:
               - user.lifecycle.create
-  importRestrictedDomains:
-    handler: schedule/import-restricted-domains.handler
-    description: Import list of restricted domains from Google Drive
+  syncRestrictedDomains:
+    handler: schedule/sync-restricted-domains.handler
+    description: Sync list of restricted domains from Google Sheet
     memorySize: 1024
     timeout: 120
     environment:
