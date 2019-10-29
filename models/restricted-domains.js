@@ -31,7 +31,7 @@ class RestrictedDomains {
   async googleSheetDomains () {
     const client = new google.auth.JWT({
       email: process.env.GOOGLE_CLIENT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      key: `-----BEGIN PRIVATE KEY-----\n${process.env.GOOGLE_PRIVATE_KEY}\n-----END PRIVATE KEY-----\n`,
       scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
     })
 

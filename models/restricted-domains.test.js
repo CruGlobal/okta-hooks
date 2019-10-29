@@ -44,7 +44,7 @@ describe('RestrictedDomains', () => {
       expect(result).toEqual(['cru.org', 'avengers.org', 'example.com'])
       expect(google.auth.JWT).toHaveBeenCalledWith({
         email: 'client@okta-hooks.example.com',
-        key: `-----BEGIN PRIVATE KEY-----\nabcdefg\n`,
+        key: `-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n`,
         scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
       })
       expect(google.sheets).toHaveBeenCalledWith({ version: 'v4', auth: google.auth.JWT.mock.instances[0] })
