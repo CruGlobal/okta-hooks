@@ -20,4 +20,6 @@ const rollbar = new Rollbar({
   }
 })
 
-export default rollbar
+export default {
+  error: (...args) => new Promise(resolve => rollbar.error(...args, resolve))
+}

@@ -14,6 +14,12 @@ const DEFAULT_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8'
 }
 
+const DEFAULTS_ERROR = {
+  locationType: 'body',
+  location: 'data.userProfile.login',
+  domain: 'end-user'
+}
+
 class HookResponse {
   constructor (options = {}) {
     const { statusCode = 200, headers = {}, body = {} } = options
@@ -21,15 +27,26 @@ class HookResponse {
     this.headers = { ...DEFAULT_HEADERS, ...headers }
     this.body = body
     this.commands = []
+    this.errors = []
   }
 
   addCommand (type, value) {
     this.commands.push({ type, value })
   }
 
+  addError ({ errorSummary, reason, ...others }) {
+    this.errors.push({ ...DEFAULTS_ERROR, errorSummary, reason, ...others })
+  }
+
   buildBody () {
     return merge({}, {
-      ...(this.commands.length ? { commands: this.commands } : {})
+      ...(this.commands.length ? { commands: this.commands } : {}),
+      ...(this.errors.length ? {
+        error: {
+          errorSummary: 'Errors were found in the user profile',
+          errorCauses: this.errors
+        }
+      } : {})
     }, this.body)
   }
 

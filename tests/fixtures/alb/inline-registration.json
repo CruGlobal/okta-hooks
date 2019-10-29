@@ -23,6 +23,6 @@
     "x-forwarded-proto": "https",
     "x-okta-request-id": "Xa87Lk0UCZ2i524oTJp@IgAABzM"
   },
-  "body": "{\"eventId\":\"DJGRAhygSiO4-4q_jTVuCQ\",\"eventTime\":\"2019-10-22T17:23:58.000Z\",\"eventType\":\"com.okta.user.pre-registration\",\"eventTypeVersion\":\"1.0\",\"contentType\":\"application/json\",\"cloudEventVersion\":\"0.1\",\"source\":\"regnosocbrTqQ9Fbg0h7\",\"data\":{\"context\":{\"request\":{\"id\":\"Xa87Lk0UCZ2i524oTJp@IgAABzM\",\"method\":\"POST\",\"url\":{\"value\":\"/api/v1/registration/regnosocbrTqQ9Fbg0h7/register\"},\"ipAddress\":\"8.10.140.190\"}},\"userProfile\":{\"lastName\":\"Stark\",\"firstName\":\"Tony\",\"login\":\"ironman@stark.com\",\"email\":\"ironman@stark.com\"},\"action\":null}}",
+  "body": "{\"eventId\":\"DJGRAhygSiO4-4q_jTVuCQ\",\"eventTime\":\"2019-10-22T17:23:58.000Z\",\"eventType\":\"com.okta.user.pre-registration\",\"eventTypeVersion\":\"1.0\",\"contentType\":\"application/json\",\"cloudEventVersion\":\"0.1\",\"source\":\"regnosocbrTqQ9Fbg0h7\",\"data\":{\"context\":{\"request\":{\"id\":\"Xa87Lk0UCZ2i524oTJp@IgAABzM\",\"method\":\"POST\",\"url\":{\"value\":\"/api/v1/registration/regnosocbrTqQ9Fbg0h7/register\"},\"ipAddress\":\"8.10.140.190\"}},\"userProfile\":{\"lastName\":\"Stark\",\"firstName\":\"Tony\",\"login\":\"tony.stark@avengers.org\",\"email\":\"tony.stark@avengers.org\"},\"action\":null}}",
   "isBase64Encoded": false
 }

@@ -20,6 +20,16 @@ provider:
         - SNS:Subscribe
       Resource:
         Ref: OktaEventsSNSTopic
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+      Resource:
+        - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
   environment: ${file(serverless/environment.js)}
 
 package:
@@ -114,12 +124,27 @@ resources:
         DisplayName: Okta Events
         TopicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
 
+    OktaRestrictedDomainsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${env:ENVIRONMENT}-restricted-domains
+        AttributeDefinitions:
+          - AttributeName: DomainName
+            AttributeType: S
+        KeySchema:
+          - AttributeName: DomainName
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
 functions:
   registration:
     handler: hooks/inline/registration.handler
     memorySize: 128
     timeout: 5
-    description: Registration hook to generate a new GUID.
+    description: Registration hook to generate a new GUID and prevent signup with restricted domain.
+    environment:
+      DYNAMODB_RESTRICTED_DOMAINS:
+        Ref: OktaRestrictedDomainsTable
     events:
       - alb:
           listenerArn:
@@ -177,3 +202,15 @@ functions:
           filterPolicy:
             eventType:
               - user.lifecycle.create
+  syncRestrictedDomains:
+    handler: schedule/sync-restricted-domains.handler
+    description: Sync list of restricted domains from Google Sheet
+    memorySize: 1024
+    timeout: 120
+    environment:
+      DYNAMODB_RESTRICTED_DOMAINS:
+        Ref: OktaRestrictedDomainsTable
+    events:
+      - schedule:
+          # Run daily at 12:00a and 12:00p UTC
+          rate: cron(0 0,12 * * ? *)
