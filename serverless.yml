@@ -158,6 +158,7 @@ functions:
             method:
               - POST
             path: /registration
+
   verification:
     handler: hooks/event/verification.handler
     memorySize: 128
@@ -169,6 +170,7 @@ functions:
             Ref: OktaLoadBalancerListener
           priority: 2
           conditions: {} # conditions are handled in Resources block for verification lambda
+
   events:
     handler: hooks/event/events.handler
     memorySize: 128
@@ -190,6 +192,7 @@ functions:
             method:
               - POST
             path: /events
+
   userLifecycleCreate:
     handler: sns/user/lifecycle/create.handler
     description: Handle all `user.lifecycle.create` okta events
@@ -202,6 +205,20 @@ functions:
           filterPolicy:
             eventType:
               - user.lifecycle.create
+
+  userAccountUpdateProfile:
+    handler: sns/user/account/update-profile.handler
+    description: Handle all `user.account.update_profile` okta events
+    memorySize: 256
+    timeout: 6
+    events:
+      - sns:
+          arn: !Ref OktaEventsSNSTopic
+          topicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
+          filterPolicy:
+            eventType:
+              - user.account.update_profile
+
   syncRestrictedDomains:
     handler: schedule/sync-restricted-domains.handler
     description: Sync list of restricted domains from Google Sheet
