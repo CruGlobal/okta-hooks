@@ -10,21 +10,23 @@ export const handler = async (lambdaEvent) => {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)
     const user = await okta.getUser(request.userId)
     let hasUpdate = false
+
+    // If login changed, and it doesn't match email, set email to the value of login and mark for update
     if (request.changedAttributes.includes('login')) {
-      // If login changed, and it doesn't match email, set email to the value of login
       if (user.profile.login !== user.profile.email) {
         user.profile.email = user.profile.login
         hasUpdate = true
       }
     }
 
-    if (user.profile.theKeyGuid && request.changedAttributes.length > 0) {
-      // If theKeyGuid is set and something changed, update Global Registry
-      if (await globalRegistry.updateProfile(user.profile)) {
+    // If theKeyGuid is set and something changed, update Global Registry, mark for update if GR changed profile
+    if (user.profile.theKeyGuid && user.status !== 'DEPROVISIONED' && request.changedAttributes.length > 0) {
+      if (await globalRegistry.createOrUpdateProfile(user.profile)) {
         hasUpdate = true
       }
     }
 
+    // Fire user update if marked for update
     if (hasUpdate) {
       await user.update()
     }

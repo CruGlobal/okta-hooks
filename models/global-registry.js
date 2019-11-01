@@ -13,7 +13,7 @@ class GlobalRegistry {
     this.client = new GRClient({ baseUrl, accessToken })
   }
 
-  async updateProfile (profile) {
+  async createOrUpdateProfile (profile) {
     const personEntity = await this.buildPersonEntity(profile)
 
     await this.deleteDesignationRelationshipIfNecessary(profile)

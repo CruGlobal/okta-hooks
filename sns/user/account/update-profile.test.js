@@ -4,12 +4,12 @@ import { mockGetUser } from '@okta/okta-sdk-nodejs'
 import GlobalRegistry from '../../../models/global-registry'
 import uuid from 'uuid/v4'
 
-const mockUpdateProfile = jest.fn()
+const mockCreateOrUpdateProfile = jest.fn()
 jest.mock('../../../config/rollbar')
 jest.mock('../../../models/global-registry', () => ({
   __esModule: true,
   default: jest.fn(() => ({
-    updateProfile: mockUpdateProfile
+    createOrUpdateProfile: mockCreateOrUpdateProfile
   }))
 }))
 
@@ -23,33 +23,35 @@ describe('user.account.update_profile SNS message', () => {
     mockUpdate = jest.fn()
     mockGetUser.mockResolvedValue({
       profile,
+      status: 'ACTIVE',
       update: mockUpdate
     })
   })
 
   it('should update user if login/email has changed', async () => {
     await handler(updateProfileEvent)
+    expect(GlobalRegistry).toHaveBeenCalledWith('secret', 'https://example.com')
     expect(mockGetUser).toHaveBeenCalledWith('00uo48gsq4ujEWoXJ0h7')
     expect(profile.email).toEqual(profile.login)
-    expect(mockUpdateProfile).not.toHaveBeenCalled()
+    expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()
     expect(mockUpdate).toHaveBeenCalled()
   })
 
   it('should update user if profile was updated', async () => {
-    mockUpdateProfile.mockResolvedValue(true)
+    mockCreateOrUpdateProfile.mockResolvedValue(true)
     profile.theKeyGuid = uuid()
     await handler({ Records: [{ Sns: { Message: JSON.stringify({ debugContext: { debugData: { changedAttributes: 'firstName' } } }) } }] })
     expect(mockGetUser).toHaveBeenCalled()
-    expect(mockUpdateProfile).toHaveBeenCalledWith(profile)
+    expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
     expect(mockUpdate).toHaveBeenCalled()
   })
 
   it('should do nothing if nothing was changed', async () => {
-    mockUpdateProfile.mockResolvedValue(false)
+    mockCreateOrUpdateProfile.mockResolvedValue(false)
     profile.theKeyGuid = uuid()
     await handler({ Records: [{ Sns: { Message: JSON.stringify({ debugContext: { debugData: { changedAttributes: 'firstName' } } }) } }] })
     expect(mockGetUser).toHaveBeenCalled()
-    expect(mockUpdateProfile).toHaveBeenCalledWith(profile)
+    expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 

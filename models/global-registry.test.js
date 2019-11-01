@@ -203,7 +203,7 @@ describe('GlobalRegistry', () => {
     })
   })
 
-  describe('updateProfile( profile )', () => {
+  describe('createOrUpdateProfile( profile )', () => {
     let profile
     beforeEach(() => {
       profile = {
@@ -225,7 +225,7 @@ describe('GlobalRegistry', () => {
           }
         }
       })
-      expect(await globalRegistry.updateProfile(profile)).toBeTruthy()
+      expect(await globalRegistry.createOrUpdateProfile(profile)).toBeTruthy()
       expect(profile.thekeyGrPersonId).toEqual(personId)
       expect(profile.grMasterPersonId).toEqual(masterPersonId)
     })
@@ -241,7 +241,7 @@ describe('GlobalRegistry', () => {
           }
         }
       })
-      expect(await globalRegistry.updateProfile(profile)).toBeFalsy()
+      expect(await globalRegistry.createOrUpdateProfile(profile)).toBeFalsy()
     })
   })
 })
