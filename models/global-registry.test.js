@@ -244,4 +244,23 @@ describe('GlobalRegistry', () => {
       expect(await globalRegistry.createOrUpdateProfile(profile)).toBeFalsy()
     })
   })
+
+  describe('deleteProfile( profile )', () => {
+    it('should remove person and designation fro GR', async () => {
+      const profile = { theKeyGuid: uuid(), theKeyGrPersonId: uuid(), grMasterPersonId: uuid() }
+      const person1 = uuid()
+      const person2 = uuid()
+      mockEntityGET.mockResolvedValue({ entities: [{ person: { id: person1 } }, { person: { id: person2 } }] })
+      mockEntityDELETE.mockResolvedValue({})
+      jest.spyOn(globalRegistry, 'deleteDesignationRelationshipIfNecessary')
+
+      expect(await globalRegistry.deleteProfile(profile)).toBeTruthy()
+      expect(mockEntityGET).toHaveBeenCalled()
+      expect(mockEntityDELETE).toHaveBeenCalledWith(person1)
+      expect(mockEntityDELETE).toHaveBeenCalledWith(person2)
+      expect(globalRegistry.deleteDesignationRelationshipIfNecessary).toHaveBeenCalledWith(expect.anything(), true)
+      expect(profile.theKeyGrPersonId).toEqual(null)
+      expect(profile.grMasterPersonId).toEqual(null)
+    })
+  })
 })

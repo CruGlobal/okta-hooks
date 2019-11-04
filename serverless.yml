@@ -206,6 +206,20 @@ functions:
             eventType:
               - user.lifecycle.create
 
+  userLifecycleStatusChange:
+    handler: sns/user/lifecycle/status-change.handler
+    description: Handles all `user.lifecycle.deactivated` and `user.lifecycle.reactivate` okta events
+    memorySize: 128
+    timeout: 6
+    events:
+      - sns:
+          arn: !Ref OktaEventsSNSTopic
+          topicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
+          filterPolicy:
+            eventType:
+              - user.lifecycle.deactivate
+              - user.lifecycle.reactivate
+
   userAccountUpdateProfile:
     handler: sns/user/account/update-profile.handler
     description: Handle all `user.account.update_profile` okta events

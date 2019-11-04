@@ -5,8 +5,11 @@ import get from 'lodash/get'
 import find from 'lodash/find'
 import equalsIgnoreCase from '../utils/equals-ignore-case'
 
+export const PERSON_ENTITY_TYPE = 'person'
 export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designation'
-export const CLIENT_INTEGRATION_ID = 'client_integration_id'
+export const THE_KEY_SYSYEM = 'the_key'
+export const PSHR_SYSTEM = 'pshr'
+export const SIEBEL_SYSTEM = 'siebel'
 
 class GlobalRegistry {
   constructor (accessToken, baseUrl) {
@@ -18,7 +21,7 @@ class GlobalRegistry {
 
     await this.deleteDesignationRelationshipIfNecessary(profile)
 
-    const result = await this.client.Entity.post({ person: personEntity }, {
+    const result = await this.client.Entity.post({ [PERSON_ENTITY_TYPE]: personEntity }, {
       require_mdm: true,
       fields: 'master_person:relationship'
     })
@@ -31,6 +34,27 @@ class GlobalRegistry {
       return true
     }
     return false
+  }
+
+  async deleteProfile (profile) {
+    const response = await this.client.Entity.get({
+      entity_type: PERSON_ENTITY_TYPE,
+      filters: {
+        owned_by: THE_KEY_SYSYEM,
+        client_integration_id: profile.theKeyGuid
+      }
+    })
+    // remove user(s) from the GR since the account is deactivated
+    await Promise.all(response.entities.filter(entity => get(entity, 'person.id'))
+      .map(entity => this.client.Entity.delete(entity.person.id)))
+
+    // delete any potentially orphaned entities or relationships
+    await this.deleteDesignationRelationshipIfNecessary(profile, true)
+
+    // remove stored person and master_person ids and signal profile has changed
+    profile.theKeyGrPersonId = null
+    profile.grMasterPersonId = null
+    return true
   }
 
   async findOrCreateDesignationEntity (designationNumber) {
@@ -63,8 +87,8 @@ class GlobalRegistry {
       ...(profile.usEmployeeId && !this.isProbablyTestAccount(profile.login) ? {
         account_number: profile.usEmployeeId,
         linked_identities: {
-          pshr: { account_number: profile.usEmployeeId },
-          siebel: { account_number: profile.usEmployeeId }
+          [PSHR_SYSTEM]: { account_number: profile.usEmployeeId },
+          [SIEBEL_SYSTEM]: { account_number: profile.usEmployeeId }
         }
       } : {
         account_number: null
@@ -88,7 +112,7 @@ class GlobalRegistry {
    * (A faulty sync was deployed & run that didn't perform this relationship cleanup step.)
    * In this case, the given user's GR person id is not null, but it does not match the relationship's person id.
    */
-  async deleteDesignationRelationshipIfNecessary (profile) {
+  async deleteDesignationRelationshipIfNecessary (profile, deactivated = false) {
     const relationshipEntity = await this.getDesignationRelationshipEntity(profile.theKeyGuid)
     if (relationshipEntity) {
       const grDesignationNumber = get(relationshipEntity, 'designation.designation_number')
@@ -96,11 +120,13 @@ class GlobalRegistry {
       const theKeyPersonId = profile.thekeyGrPersonId
 
       const shouldDelete =
-        /* the designation number changed */
+        // the user is deactivated
+        deactivated ||
+        // the designation number changed
         !equalsIgnoreCase(grDesignationNumber, profile.usDesignationNumber) ||
-        /* the person entity was recently deleted or doesn't exist yet */
+        // the person entity was recently deleted or doesn't exist yet
         !theKeyPersonId ||
-        /* the person entity doesn't match */
+        // the person entity doesn't match
         !equalsIgnoreCase(theKeyPersonId, currentAssociatedPersonId)
 
       if (shouldDelete) {
@@ -112,12 +138,12 @@ class GlobalRegistry {
   async getDesignationRelationshipEntity (theKeyGuid) {
     const result = await this.client.Entity.get({
       entity_type: PERSON_DESIGNATION_ENTITY_TYPE,
-      filters: { owned_by: 'the_key', [CLIENT_INTEGRATION_ID]: theKeyGuid }
+      filters: { owned_by: THE_KEY_SYSYEM, client_integration_id: theKeyGuid }
     })
     /* istanbul ignore else */
     if (result.entities) {
       const entity = find(result.entities,
-        obj => equalsIgnoreCase(get(obj, `${PERSON_DESIGNATION_ENTITY_TYPE}.${CLIENT_INTEGRATION_ID}`), theKeyGuid))
+        obj => equalsIgnoreCase(get(obj, `${PERSON_DESIGNATION_ENTITY_TYPE}.client_integration_id`), theKeyGuid))
       return get(entity, PERSON_DESIGNATION_ENTITY_TYPE)
     }
   }
