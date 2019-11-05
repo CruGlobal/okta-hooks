@@ -23,7 +23,7 @@ export const handler = async (lambdaEvent) => {
       await user.update()
     }
   } catch (error) {
-    await rollbar.error('user.lifecycle.create Error', error, { lambdaEvent })
+    await rollbar.error('status-change Error', error, { lambdaEvent })
     throw error
   }
 }
