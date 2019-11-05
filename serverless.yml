@@ -245,3 +245,20 @@ functions:
       - schedule:
           # Run daily at 12:00a and 12:00p UTC
           rate: cron(0 0,12 * * ? *)
+
+  scim:
+    handler: scim/request.handler
+    memorySize: 512
+    timeout: 60
+    description: SCIM Request handler
+    events:
+      - alb:
+          listenerArn:
+            Ref: OktaLoadBalancerListener
+          priority: 4
+          conditions:
+            path: /scim/v2/*
+            header:
+              name: Authorization
+              values:
+                - Bearer ${env:OKTA_SHARED_SECRET}

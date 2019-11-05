@@ -21,5 +21,6 @@ const rollbar = new Rollbar({
 })
 
 export default {
-  error: (...args) => new Promise(resolve => rollbar.error(...args, resolve))
+  error: (...args) => new Promise(resolve => rollbar.error(...args, resolve)),
+  warning: (...args) => new Promise(resolve => rollbar.warning(...args, resolve))
 }
