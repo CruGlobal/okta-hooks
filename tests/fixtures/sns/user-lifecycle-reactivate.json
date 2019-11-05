@@ -1,0 +1,26 @@
+{
+  "Records": [
+    {
+      "EventVersion": "1.0",
+      "EventSubscriptionArn": "arn:aws:sns:us-east-2:123456789012:sns-lambda:21be56ed-a058-49f5-8c98-aedd2564c486",
+      "EventSource": "aws:sns",
+      "Sns": {
+        "Type": "Notification",
+        "MessageId": "bca5aebb-27bc-54a4-8586-f8909027a649",
+        "TopicArn": "arn:aws:sns:us-east-1:056154071827:okta-lifecycle-events",
+        "Message": "{\"uuid\":\"b5a27583-f66a-11e9-a361-bda85973de4a\",\"published\":\"2019-10-24T14:29:38.580Z\",\"eventType\":\"user.lifecycle.reactivate\",\"version\":\"0\",\"displayMessage\":\"Reactivate Okta user\",\"severity\":\"INFO\",\"client\":{\"ipChain\":[]},\"actor\":{\"id\":\"sprnatyt09a3WRgoL0h7\",\"type\":\"SystemPrincipal\",\"alternateId\":\"system@okta.com\",\"displayName\":\"Okta System\"},\"outcome\":{\"result\":\"SUCCESS\"},\"target\":[{\"id\":\"00uo1red47olcenOx0h7\",\"type\":\"User\",\"alternateId\":\"bruce.banner@avengers.org\",\"displayName\":\"Bruce Banner\"}],\"transaction\":{\"id\":\"unknown\",\"detail\":{}},\"debugContext\":{\"debugData\":{\"requestUri\":\"/api/v1/registration/regnosocbrTqQ9Fbg0h7/register\",\"targetEventHookIds\":\"whoo0erni6PIVagJY0h7\"}},\"legacyEventType\":\"core.user.config.user_reactivation.success\",\"authenticationContext\":{\"authenticationStep\":0,\"externalSessionId\":\"trsjord5oBFQkqkYtXd-PPzdA\"},\"securityContext\":{}}",
+        "Timestamp": "2019-10-24T14:29:47.428Z",
+        "SignatureVersion": "1",
+        "Signature": "Ovt6g3BYgEKBT5ahL3l84CdfbxiAf7tgiIDls0sdmx/A0uUPrLaUFVxzL/5fOgnGazhKMH0jR9FF9Qz6msSvb9UapxpeSN7QluRA2ohEZ3S08ZuEeqYpj09TvNE1TSQi251zvFWymbHz7p4JHrHmrLbThDFV13CDvU4I3ZD7ht1Fa5T6n8egHDUVYG4karzcst6s2pYeCXHh2za7m6N3Qpcpb//aYm5I8S+0MJQOxz4yes8d7jGnUwC/ECY19TjIzpy5JaIIYwqp7PYz+8JL5LNInodb21nwgFzFtnlfG89KjrPkou3w1X4ui6dCv8+Icfx1AAe7fP7rDd/wORP/Rg==",
+        "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-6aad65c2f9911b05cd53efda11f913f9.pem",
+        "UnsubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:056154071827:okta-lifecycle-events:6b1bb134-1429-4ca7-b37d-a3e87fce1ed5",
+        "MessageAttributes": {
+          "eventType": {
+            "Type": "String",
+            "Value": "user.lifecycle.reactivate"
+          }
+        }
+      }
+    }
+  ]
+}
