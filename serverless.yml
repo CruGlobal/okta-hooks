@@ -22,6 +22,12 @@ provider:
         Ref: OktaEventsSNSTopic
     - Effect: Allow
       Action:
+        - SNS:Publish
+        - SNS:Subscribe
+      Resource:
+        Ref: OktaLDAPSyncSNSTopic
+    - Effect: Allow
+      Action:
         - dynamodb:Query
         - dynamodb:Scan
         - dynamodb:GetItem
@@ -116,6 +122,12 @@ resources:
       Properties:
         DisplayName: Okta Events
         TopicName: ${self:service}-${env:ENVIRONMENT}-lifecycle-events
+
+    OktaLDAPSyncSNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: LDAP to Okta Sync
+        TopicName: ${self:service}-${env:ENVIRONMENT}-ldap-sync
 
     OktaRestrictedDomainsTable:
       Type: AWS::DynamoDB::Table
@@ -238,3 +250,16 @@ functions:
       - schedule:
           # Run daily at 12:00a and 12:00p UTC
           rate: cron(0 0,12 * * ? *)
+
+  ldapSync:
+    handler: sns/ldap-sync.handler
+    description: Sync users from LDAP to Okta
+    memorySize: 512
+    timeout: 60
+    package:
+      include:
+        - bin/getpass/**
+    events:
+      - sns:
+          arn: !Ref OktaLDAPSyncSNSTopic
+          topicName: ${self:service}-${env:ENVIRONMENT}-ldap-sync
