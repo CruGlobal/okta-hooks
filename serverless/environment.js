@@ -13,6 +13,8 @@ module.exports = () => {
     GOOGLE_PRIVATE_KEY: process.env['GOOGLE_PRIVATE_KEY'] || '-----BEGIN PRIVATE KEY-----\nMIIEvA\n',
     GOOGLE_RESTRICTED_DOMAINS_SHEET: process.env['GOOGLE_RESTRICTED_DOMAINS_SHEET'] || 'google_sheet_id',
     GLOBAL_REGISTRY_TOKEN: process.env['GLOBAL_REGISTRY_TOKEN'] || 'secret',
-    GLOBAL_REGISTRY_URL: process.env['GLOBAL_REGISTRY_URL'] || 'https://backend.global-registry.org'
+    GLOBAL_REGISTRY_URL: process.env['GLOBAL_REGISTRY_URL'] || 'https://backend.global-registry.org',
+    LDAP_URL: process.env['LDAP_URL'] || 'ldaps://example.com:636',
+    LDAP_PASSWORD: process.env['LDAP_PASSWORD'] || 'secret'
   }
 }
