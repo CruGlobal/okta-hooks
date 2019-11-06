@@ -33,14 +33,7 @@ provider:
   environment: ${file(serverless/environment.js)}
 
 package:
-  exclude:
-    - .serverless/**
-    - .webpack/**
-    - .git/**
-    - test/**
-    - '**/*.test.js'
-    - '**/*.sql'
-    - .deployment/**
+  individually: true
 
 plugins:
   - '@cruglobal/serverless-merge-config'
