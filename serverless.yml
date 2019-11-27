@@ -28,7 +28,7 @@ provider:
         - dynamodb:PutItem
         - dynamodb:UpdateItem
         - dynamodb:DeleteItem
-        - dynamodb:BatchWrite
+        - dynamodb:BatchWriteItem
       Resource:
         - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
   environment: ${file(serverless/environment.js)}
