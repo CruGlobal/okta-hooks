@@ -10,9 +10,12 @@ provider:
       - ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.webapp_elb_sg}
     subnetIds: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_apps_1_all}
   stackTags:
+    Name: ${env:PROJECT_NAME}-${self:custom.environmentMap.${env:ENVIRONMENT}}
     owner: apps@cru.org
     application: ${env:PROJECT_NAME}
-    env: ${env:ENVIRONMENT}
+    env: ${self:custom.environmentMap.${env:ENVIRONMENT}}
+    managed_by: serverless-framework
+    function: lambda
   iamRoleStatements:
     - Effect: Allow
       Action:
@@ -53,6 +56,11 @@ custom:
     includeModules: true
     packager: yarn
     excludeFiles: '**/*.test.js'
+  environmentMap:
+    production: prod
+    staging: stage
+    development: dev
+    lab: lab
 
 resources:
   Resources:
