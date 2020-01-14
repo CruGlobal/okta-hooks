@@ -11,7 +11,7 @@ provider:
     subnetIds: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_apps_1_all}
   stackTags:
     Name: ${env:PROJECT_NAME}-${self:custom.environmentMap.${env:ENVIRONMENT}}
-    owner: apps@cru.org
+    owner: devops-engineering-team@cru.org
     application: ${env:PROJECT_NAME}
     env: ${self:custom.environmentMap.${env:ENVIRONMENT}}
     managed_by: serverless-framework
@@ -37,6 +37,7 @@ provider:
   environment: ${file(serverless/environment.js)}
 
 package:
+  individually: true
   exclude:
     - .serverless/**
     - .webpack/**

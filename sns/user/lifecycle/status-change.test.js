@@ -33,7 +33,7 @@ describe('status change handler', () => {
       await handler(deactivateEvent)
       expect(mockGetUser).toHaveBeenCalledWith('00uo1red47olcenOx0h7')
       expect(mockDeleteProfile).toHaveBeenCalledWith({})
-      expect(mockUpdate).toHaveBeenCalled()
+      expect(mockUpdate).not.toHaveBeenCalled()
     })
   })
 
