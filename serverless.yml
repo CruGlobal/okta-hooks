@@ -207,7 +207,7 @@ functions:
     handler: sns/user/lifecycle/create.handler
     description: Handle all `user.lifecycle.create` okta events
     memorySize: 256
-    timeout: 6
+    timeout: 30
     events:
       - sns:
           arn: !Ref OktaEventsSNSTopic

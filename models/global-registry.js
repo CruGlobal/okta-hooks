@@ -22,6 +22,7 @@ class GlobalRegistry {
     await this.deleteDesignationRelationshipIfNecessary(profile)
 
     const result = await this.client.Entity.post({ [PERSON_ENTITY_TYPE]: personEntity }, {
+      full_response: true,
       require_mdm: true,
       fields: 'master_person:relationship'
     })
