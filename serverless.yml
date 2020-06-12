@@ -252,9 +252,8 @@ functions:
       DYNAMODB_RESTRICTED_DOMAINS:
         Ref: OktaRestrictedDomainsTable
     events:
-      - schedule:
-          # Run daily at 12:00a and 12:00p UTC
-          rate: cron(0 0,12 * * ? *)
+      # Run daily at 12:00a and 12:00p UTC
+      - schedule: cron(0 0,12 * * ? *)
 
   syncMissingOktaUsers:
     handler: schedule/sync-missing-okta-users.handler
@@ -265,6 +264,5 @@ functions:
       SNS_OKTA_EVENTS_ARN:
         Ref: OktaEventsSNSTopic
     events:
-      - schedule:
-          # Run at every 30th minute. https://crontab.guru/every-30-minutes
-          rate: cron(*/30 * * * *)
+      # Run at every 30th minute.
+      - schedule: cron(*/30 * * * * *)
