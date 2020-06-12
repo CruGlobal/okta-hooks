@@ -264,5 +264,5 @@ functions:
       SNS_OKTA_EVENTS_ARN:
         Ref: OktaEventsSNSTopic
     events:
-      # Run at every 30th minute.
-      - schedule: cron(*/30 * * * * *)
+      # Run every 30 minutes.
+      - schedule: cron(0/30 * * * ? *)
