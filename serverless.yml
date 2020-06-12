@@ -255,3 +255,16 @@ functions:
       - schedule:
           # Run daily at 12:00a and 12:00p UTC
           rate: cron(0 0,12 * * ? *)
+
+  syncMissingOktaUsers:
+    handler: schedule/sync-missing-okta-users.handler
+    description: Query okta users missing Global Registry IDs and enqueue to SNS to re-sync them.
+    memorySize: 1024
+    timeout: 120
+    environment:
+      SNS_OKTA_EVENTS_ARN:
+        Ref: OktaEventsSNSTopic
+    events:
+      - schedule:
+          # Run at every 30th minute. https://crontab.guru/every-30-minutes
+          rate: cron(*/30 * * * *)

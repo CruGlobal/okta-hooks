@@ -9,6 +9,7 @@ module.exports = () => {
     OKTA_SHARED_SECRET: process.env['OKTA_SHARED_SECRET'] || 'sharingiscaring',
     OKTA_CLIENT_ORGURL: process.env['OKTA_CLIENT_ORGURL'] || 'https://cru.oktapreview.com/',
     OKTA_CLIENT_TOKEN: process.env['OKTA_CLIENT_TOKEN'] || 'secret',
+    OKTA_MISSING_GROUP_ID: process.env['OKTA_MISSING_GROUP_ID'] || '00groupID',
     GOOGLE_CLIENT_EMAIL: process.env['GOOGLE_CLIENT_EMAIL'] || 'wilbur@example.com',
     GOOGLE_PRIVATE_KEY: process.env['GOOGLE_PRIVATE_KEY'] || '-----BEGIN PRIVATE KEY-----\nMIIEvA\n',
     GOOGLE_RESTRICTED_DOMAINS_SHEET: process.env['GOOGLE_RESTRICTED_DOMAINS_SHEET'] || 'google_sheet_id',
