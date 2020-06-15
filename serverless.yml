@@ -3,7 +3,7 @@ service: okta-hooks
 provider:
   name: aws
   stage: ${env:ENVIRONMENT}
-  runtime: nodejs10.x
+  runtime: nodejs12.x
   region: us-east-1
   vpc:
     securityGroupIds:
@@ -207,7 +207,7 @@ functions:
     handler: sns/user/lifecycle/create.handler
     description: Handle all `user.lifecycle.create` okta events
     memorySize: 256
-    timeout: 30
+    timeout: 12
     events:
       - sns:
           arn: !Ref OktaEventsSNSTopic
@@ -234,7 +234,7 @@ functions:
     handler: sns/user/account/update-profile.handler
     description: Handle all `user.account.update_profile` okta events
     memorySize: 256
-    timeout: 6
+    timeout: 12
     events:
       - sns:
           arn: !Ref OktaEventsSNSTopic
@@ -252,6 +252,17 @@ functions:
       DYNAMODB_RESTRICTED_DOMAINS:
         Ref: OktaRestrictedDomainsTable
     events:
-      - schedule:
-          # Run daily at 12:00a and 12:00p UTC
-          rate: cron(0 0,12 * * ? *)
+      # Run daily at 12:00a and 12:00p UTC
+      - schedule: cron(0 0,12 * * ? *)
+
+  syncMissingOktaUsers:
+    handler: schedule/sync-missing-okta-users.handler
+    description: Query okta users missing Global Registry IDs and enqueue to SNS to re-sync them.
+    memorySize: 1024
+    timeout: 120
+    environment:
+      SNS_OKTA_EVENTS_ARN:
+        Ref: OktaEventsSNSTopic
+    events:
+      # Run every 30 minutes.
+      - schedule: cron(0/30 * * * ? *)
