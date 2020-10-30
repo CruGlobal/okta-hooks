@@ -54,7 +54,7 @@ describe('registration hook', () => {
           errorSummary: 'Errors were found in the user profile',
           errorCauses: [{
             locationType: 'body',
-            location: 'data.userProfile.email',
+            location: 'data.userProfile.login',
             domain: 'end-user',
             errorSummary: 'You specified a restricted email domain. Please contact help@cru.org to set-up this account.',
             reason: 'RESTRICTED_EMAIL_DOMAIN'
