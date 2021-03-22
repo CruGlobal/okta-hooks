@@ -11,7 +11,7 @@ export const handler = async (lambdaEvent) => {
     if (await RestrictedDomains.isRestricted(registration.login)) {
       response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'DENY' })
       response.addError({
-        errorSummary: 'You specified a restricted email domain. Please contact help@checkmyokta.com to set-up this account.',
+        errorSummary: 'help@checkmyokta.com must be contacted before this email domain can be used.',
         reason: 'RESTRICTED_EMAIL_DOMAIN',
         location: 'data.userProfile.login'
       })
