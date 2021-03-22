@@ -56,7 +56,7 @@ describe('registration hook', () => {
             locationType: 'body',
             location: 'data.userProfile.login',
             domain: 'end-user',
-            errorSummary: 'You specified a restricted email domain. Please contact help@checkmyokta.com to set-up this account.',
+            errorSummary: 'help@checkmyokta.com must be contacted before this email domain can be used.',
             reason: 'RESTRICTED_EMAIL_DOMAIN'
           }]
         }
