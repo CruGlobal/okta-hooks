@@ -7,6 +7,7 @@ import has from 'lodash/has'
 import difference from 'lodash/difference'
 import concat from 'lodash/concat'
 import chunk from 'lodash/chunk'
+import uniq from 'lodash/uniq'
 
 class RestrictedDomains {
   static async isRestricted (emailAddress) {
@@ -43,7 +44,7 @@ class RestrictedDomains {
     if (typeof response.data.values === 'undefined') {
       throw new Error('Restricted Domains Google sheet returned empty response.')
     }
-    return compact(response.data.values.map(item => toLower(item[0])))
+    return uniq(compact(response.data.values.map(item => toLower(item[0]))))
   }
 
   async syncDomainsFromGoogle () {
