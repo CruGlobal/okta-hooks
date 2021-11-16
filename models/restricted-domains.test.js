@@ -67,7 +67,9 @@ describe('RestrictedDomains', () => {
           values: [
             ['cru.org'],
             ['Avengers.org'],
-            ['example.com']]
+            ['example.com'],
+            ['Cru.org'],
+            ['']]
         }
       })
       DocumentClient._scanPromiseMock.mockResolvedValue({
