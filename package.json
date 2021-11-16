@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@okta/okta-sdk-nodejs": "^2.0.1",
-    "aws-sdk": "^2.470.0",
+    "aws-sdk": "^2.814.0",
     "email-addresses": "^3.1.0",
     "global-registry-nodejs-client": "https://github.com/CruGlobal/global-registry-nodejs-client.git",
     "googleapis": "^44.0.0",
