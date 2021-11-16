@@ -50,7 +50,7 @@ describe('RestrictedDomains', () => {
       expect(google.sheets).toHaveBeenCalledWith({ version: 'v4', auth: google.auth.JWT.mock.instances[0] })
       expect(mockSpreadsheetsGet).toHaveBeenCalledWith({
         spreadsheetId: 'google_spreadsheet',
-        range: 'A2:A'
+        range: "'Okta self-service prevention'!A2:A"
       })
     })
     it('throws an error if the list is empty', async () => {

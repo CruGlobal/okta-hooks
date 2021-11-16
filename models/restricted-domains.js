@@ -38,7 +38,7 @@ class RestrictedDomains {
     const sheets = google.sheets({ version: 'v4', auth: client })
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_RESTRICTED_DOMAINS_SHEET,
-      range: 'A2:A' // Column A except header
+      range: "'Okta self-service prevention'!A2:A" // Column A except header, sheet name requires single quotes
     })
     if (typeof response.data.values === 'undefined') {
       throw new Error('Restricted Domains Google sheet returned empty response.')
