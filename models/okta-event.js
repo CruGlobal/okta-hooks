@@ -13,6 +13,10 @@ class OktaEvent {
     return get(this.event, 'target.0.id')
   }
 
+  get actorId () {
+    return get(this.event, 'actor.id')
+  }
+
   get changedAttributes () {
     const attrs = get(this.event, 'debugContext.debugData.changedAttributes')
     return attrs ? attrs.split(',') : /* istanbul ignore next */ []
