@@ -7,6 +7,7 @@ import has from 'lodash/has'
 import difference from 'lodash/difference'
 import concat from 'lodash/concat'
 import chunk from 'lodash/chunk'
+import uniq from 'lodash/uniq'
 
 class RestrictedDomains {
   static async isRestricted (emailAddress) {
@@ -38,12 +39,12 @@ class RestrictedDomains {
     const sheets = google.sheets({ version: 'v4', auth: client })
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_RESTRICTED_DOMAINS_SHEET,
-      range: 'A2:A' // Column A except header
+      range: "'Okta self-service prevention'!A2:A" // Column A except header, sheet name requires single quotes
     })
     if (typeof response.data.values === 'undefined') {
       throw new Error('Restricted Domains Google sheet returned empty response.')
     }
-    return compact(response.data.values.map(item => toLower(item[0])))
+    return uniq(compact(response.data.values.map(item => toLower(item[0]))))
   }
 
   async syncDomainsFromGoogle () {
