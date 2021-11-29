@@ -14,6 +14,7 @@ module.exports = () => {
     GOOGLE_PRIVATE_KEY: process.env['GOOGLE_PRIVATE_KEY'] || '-----BEGIN PRIVATE KEY-----\nMIIEvA\n',
     GOOGLE_RESTRICTED_DOMAINS_SHEET: process.env['GOOGLE_RESTRICTED_DOMAINS_SHEET'] || 'google_sheet_id',
     GLOBAL_REGISTRY_TOKEN: process.env['GLOBAL_REGISTRY_TOKEN'] || 'secret',
-    GLOBAL_REGISTRY_URL: process.env['GLOBAL_REGISTRY_URL'] || 'https://backend.global-registry.org'
+    GLOBAL_REGISTRY_URL: process.env['GLOBAL_REGISTRY_URL'] || 'https://backend.global-registry.org',
+    OKTA_ACTOR_ID_BLOCK_LIST: process.env['OKTA_ACTOR_ID_BLOCK_LIST'] || ''
   }
 }
