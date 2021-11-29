@@ -1,0 +1,25 @@
+{
+  "requestContext": {
+    "elb": {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:056154071827:targetgroup/0a4944cdaa5909f7cd0c20bb7687cae0/74b1ab561a137f5c"
+    }
+  },
+  "httpMethod": "POST",
+  "path": "/events",
+  "queryStringParameters": {},
+  "headers": {
+    "accept": "application/json",
+    "authorization": "w4Nw^Zl*zHCDX&&L7Q!16PN6UeR*uAc4KkxA$0fiM$9xS26R&z9wOwXd4ykEWJR&",
+    "connection": "keep-alive",
+    "content-length": "1162",
+    "content-type": "application/json",
+    "host": "okta-hooks-preview.cru.org",
+    "user-agent": "Okta Hook Service v1.0.0 - whoo0erni6PIVagJY0h7",
+    "x-amzn-trace-id": "Root=1-5db1b371-7d05aa43c92cabb960387958",
+    "x-forwarded-for": "34.200.8.251",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https"
+  },
+  "body": "{\"eventType\":\"com.okta.event_hook\",\"eventTypeVersion\":\"1.0\",\"cloudEventsVersion\":\"0.1\",\"source\":\"https://signon.okta.com/api/v1/eventHooks/who1hzk33c2pxL1Yl0h8\",\"eventId\":\"c0ce732a-4933-4141-bcd5-a11e761cf90b\",\"data\":{\"events\":[{\"uuid\":\"04b1f1d4-4bbf-11ec-82ee-e73dada86765\",\"published\":\"2021-11-22T18:07:13.125Z\",\"eventType\":\"user.account.update_profile\",\"version\":\"0\",\"displayMessage\":\"Update user profile for Okta\",\"severity\":\"INFO\",\"client\":{\"userAgent\":{\"rawUserAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36\",\"os\":\"Windows 10\",\"browser\":\"CHROME\"},\"zone\":\"null\",\"device\":\"Computer\",\"id\":null,\"ipAddress\":\"50.89.143.182\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"ipChain\":[{\"ip\":\"50.89.143.182\",\"geographicalContext\":{\"city\":\"Orlando\",\"state\":\"Florida\",\"country\":\"United States\",\"postalCode\":\"32832\",\"geolocation\":{\"lat\":28.3774,\"lon\":-81.1888}},\"version\":\"V4\",\"source\":null}]},\"device\":null,\"actor\":{\"id\":\"badactor\",\"type\":\"User\",\"alternateId\":\"loki.laufeyson@example.com\",\"displayName\":\"Loki\",\"detailEntry\":null},\"outcome\":{\"result\":\"SUCCESS\",\"reason\":null},\"target\":[{\"id\":\"00u1hnx4oekfTHgqY0h8\",\"type\":\"User\",\"alternateId\":\"thor.odinson@avengers.org\",\"displayName\":\"Thor Odinson\",\"detailEntry\":null}],\"transaction\":{\"type\":\"WEB\",\"id\":\"YZvcUWlrybfJE38ty-heiAAACpQ\",\"detail\":{}},\"debugContext\":{\"debugData\":{\"requestId\":\"YZvcUWlrybfJE38ty-heiAAACpQ\",\"requestUri\":\"/api/v1/users/00u1hnx4oekfTHgqY0h8\",\"changedAttributes\":\"usDesignationNumber\",\"targetEventHookIds\":\"who1hzk33c2pxL1Yl0h8,who1mpwgrxrsCR23M0h8\",\"url\":\"/api/v1/users/00u1hnx4oekfTHgqY0h8?\"}},\"legacyEventType\":\"core.user.config.profile_update.success\",\"authenticationContext\":{\"authenticationProvider\":null,\"credentialProvider\":null,\"credentialType\":null,\"issuer\":null,\"authenticationStep\":0,\"externalSessionId\":\"102RqNWJJbrQqGF6QmEinChDw\",\"interface\":null},\"securityContext\":{\"asNumber\":33363,\"asOrg\":\"bright house networks - cfl division\",\"isp\":\"charter communications  inc\",\"domain\":\"spectrum.com\",\"isProxy\":false},\"insertionTimestamp\":null}]},\"eventTime\":\"2021-11-29T17:18:17.410Z\",\"contentType\":\"application/json\"}",
+  "isBase64Encoded": false
+}
