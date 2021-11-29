@@ -6,6 +6,7 @@ jest.mock('../../config/rollbar')
 
 const created = require('../../tests/fixtures/alb/event-user-lifecycle-create.json')
 const deleted = require('../../tests/fixtures/alb/event-user-lifecycle-delete.json')
+const updated = require('../../tests/fixtures/alb/event-user-update-profile.json')
 
 describe('events hook', () => {
   beforeEach(() => {
@@ -34,6 +35,20 @@ describe('events hook', () => {
         }
       }
     })
+  })
+
+  it('should skip events from bad actors', async () => {
+    SNS._publishPromiseMock.mockResolvedValue({})
+    const response = await handler(updated)
+    expect(response).toStrictEqual({
+      statusCode: 204,
+      statusDescription: '204 No Content',
+      isBase64Encoded: false,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8'
+      }
+    })
+    expect(SNS._publishPromiseMock).not.toBeCalled()
   })
 
   it('should respond with 500 on an error', async () => {
