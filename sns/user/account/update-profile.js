@@ -4,7 +4,7 @@ import OktaEvent from '../../../models/okta-event'
 import GlobalRegistry from '../../../models/global-registry'
 
 export const handler = async (lambdaEvent) => {
-  const okta = new Client()
+  const okta = new Client({ cacheMiddleware: null })
   const globalRegistry = new GlobalRegistry(process.env.GLOBAL_REGISTRY_TOKEN, process.env.GLOBAL_REGISTRY_URL)
   try {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)

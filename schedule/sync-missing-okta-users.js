@@ -3,7 +3,7 @@ import rollbar from '../config/rollbar'
 import { SNS } from 'aws-sdk'
 
 export const handler = async (lambdaEvent) => {
-  const okta = new Client()
+  const okta = new Client({ cacheMiddleware: null })
   const sns = new SNS({ apiVersion: '2010-03-31', region: 'us-east-1' })
   try {
     const processed = []
