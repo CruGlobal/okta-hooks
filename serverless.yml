@@ -68,13 +68,36 @@ custom:
     lab: lab
 
 resources:
-  Resources:
+  extensions:
     IamRoleLambdaExecution:
       Properties:
         ManagedPolicyArns:
           - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
           - arn:aws:iam::aws:policy/service-role/AWSLambdaENIManagementAccess
 
+    VerificationAlbListenerRule2:
+      Properties:
+        # serverless framework only allows a single header condition, we handle all verification conditions here
+        Conditions:
+          - Field: path-pattern
+            Values:
+              - /events
+          - Field: http-request-method
+            HttpRequestMethodConfig:
+              Values:
+                - GET
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: Authorization
+              Values:
+                - ${env:OKTA_SHARED_SECRET}
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: X-Okta-Verification-Challenge
+              Values:
+                - ?*
+
+  Resources:
     OktaLoadBalancer:
       Type: AWS::ElasticLoadBalancingV2::LoadBalancer
       Properties:
@@ -112,28 +135,6 @@ resources:
               MessageBody: '{"error": "Forbidden"}'
         Port: 443
         Protocol: HTTPS
-
-    VerificationAlbListenerRule2:
-      Properties:
-        # serverless framework only allows a single header condition, we handle all verification conditions here
-        Conditions:
-          - Field: path-pattern
-            Values:
-              - /events
-          - Field: http-request-method
-            HttpRequestMethodConfig:
-              Values:
-                - GET
-          - Field: http-header
-            HttpHeaderConfig:
-              HttpHeaderName: Authorization
-              Values:
-                - ${env:OKTA_SHARED_SECRET}
-          - Field: http-header
-            HttpHeaderConfig:
-              HttpHeaderName: X-Okta-Verification-Challenge
-              Values:
-                - ?*
 
     OktaEventsSNSTopic:
       Type: AWS::SNS::Topic
