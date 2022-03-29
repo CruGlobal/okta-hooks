@@ -24,24 +24,28 @@ provider:
     env: ${self:custom.environmentMap.${env:ENVIRONMENT}}
     managed_by: serverless-framework
     function: lambda
-  iamRoleStatements:
-    - Effect: Allow
-      Action:
-        - SNS:Publish
-        - SNS:Subscribe
-      Resource:
-        Ref: OktaEventsSNSTopic
-    - Effect: Allow
-      Action:
-        - dynamodb:Query
-        - dynamodb:Scan
-        - dynamodb:GetItem
-        - dynamodb:PutItem
-        - dynamodb:UpdateItem
-        - dynamodb:DeleteItem
-        - dynamodb:BatchWriteItem
-      Resource:
-        - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - SNS:Publish
+            - SNS:Subscribe
+          Resource:
+            Ref: OktaEventsSNSTopic
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:BatchWriteItem
+          Resource:
+            - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
+  layers:
+    - arn:aws:lambda:us-east-1:072686360478:layer:node-16_14_2:1
 
 package:
   individually: true
@@ -79,8 +83,11 @@ resources:
         Scheme: internet-facing
         IpAddressType: ipv4
         SecurityGroups:
-          - ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.webapp_elb_sg}
-        Subnets: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_public_1_all}
+          - sg-888294ed
+        Subnets:
+          - subnet-f5c2dfdd # us-east-1a
+          - subnet-2808db5f # us-east-1b
+          - subnet-9eda41c7 # us-east-1c
         LoadBalancerAttributes:
           - Key: access_logs.s3.enabled
             Value: true
@@ -95,7 +102,7 @@ resources:
         LoadBalancerArn:
           Ref: OktaLoadBalancer
         Certificates:
-          - CertificateArn: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.cru_wildcard_ssl}
+          - CertificateArn: "arn:aws:acm:us-east-1:056154071827:certificate/dc6b7f6b-5d69-4382-9585-26c641e6b12b"
         DefaultActions:
           - Type: fixed-response
             Order: 1
