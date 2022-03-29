@@ -19,6 +19,10 @@ module.exports = (async () => {
     performance: {
       hints: false
     },
+    optimization: {
+      minimize: true,
+      usedExports: true
+    },
     plugins: [
       new webpack.EnvironmentPlugin({
         SOURCEMAP_VERSION: version

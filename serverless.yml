@@ -60,7 +60,7 @@ custom:
     webpackConfig: ./webpack.config.js
     includeModules: true
     packager: yarn
-    excludeFiles: '**/*.test.js'
+    excludeRegex: \.ts|test|\.map
   environmentMap:
     production: prod
     staging: stage

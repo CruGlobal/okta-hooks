@@ -957,6 +957,13 @@
     minimatch "^3.0.4"
     strip-json-comments "^3.1.1"
 
+"@googleapis/sheets@^2.0.1":
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/@googleapis/sheets/-/sheets-2.0.1.tgz#3bfa3aaac77f7279ec533f9c909635291b2cacc6"
+  integrity sha512-r/N9QfarkTZ/7cY79tbmvY5fOLEtTgOMHUq3URG3A++BF4H7+vi13xdDZc33GJuJ7UfE/ERGi71tDtVkW4ZmaQ==
+  dependencies:
+    googleapis-common "^5.0.1"
+
 "@istanbuljs/load-nyc-config@^1.0.0":
   version "1.1.0"
   resolved "https://registry.yarnpkg.com/@istanbuljs/load-nyc-config/-/load-nyc-config-1.1.0.tgz#fd3db1d59ecf7cf121e80650bb86712f9b55eced"
@@ -3762,7 +3769,7 @@ globby@^11.1.0:
     merge2 "^1.4.1"
     slash "^3.0.0"
 
-google-auth-library@^7.0.2, google-auth-library@^7.14.0:
+google-auth-library@^7.14.0:
   version "7.14.1"
   resolved "https://registry.yarnpkg.com/google-auth-library/-/google-auth-library-7.14.1.tgz#e3483034162f24cc71b95c8a55a210008826213c"
   integrity sha512-5Rk7iLNDFhFeBYc3s8l1CqzbEBcdhwR193RlD4vSNFajIcINKI8W8P0JLmBpwymHqqWbX34pJDQu39cSy/6RsA==
@@ -3784,7 +3791,7 @@ google-p12-pem@^3.1.3:
   dependencies:
     node-forge "^1.0.0"
 
-googleapis-common@^5.0.2:
+googleapis-common@^5.0.1:
   version "5.1.0"
   resolved "https://registry.yarnpkg.com/googleapis-common/-/googleapis-common-5.1.0.tgz#845a79471c787e522e03c50d415467140e9e356a"
   integrity sha512-RXrif+Gzhq1QAzfjxulbGvAY3FPj8zq/CYcvgjzDbaBNCD6bUl+86I7mUs4DKWHGruuK26ijjR/eDpWIDgNROA==
@@ -3795,14 +3802,6 @@ googleapis-common@^5.0.2:
     qs "^6.7.0"
     url-template "^2.0.8"
     uuid "^8.0.0"
-
-googleapis@^99.0.0:
-  version "99.0.0"
-  resolved "https://registry.yarnpkg.com/googleapis/-/googleapis-99.0.0.tgz#cd0449810c9139c23bee213747932984fca837c2"
-  integrity sha512-ZS+iFrNvvZykpGBgTgaj0FgmKCZnC+0tmbs8b5+vJnVcaaHMp8IPUWruNSFqZjg6M8Yey8/aJxhT5mT5Ja2+VQ==
-  dependencies:
-    google-auth-library "^7.0.2"
-    googleapis-common "^5.0.2"
 
 got@^11.8.3:
   version "11.8.3"

@@ -33,11 +33,11 @@
     "webpack-node-externals": "^3.0.0"
   },
   "dependencies": {
+    "@googleapis/sheets": "^2.0.1",
     "@okta/okta-sdk-nodejs": "^6.4.0",
     "aws-sdk": "^2.1101.0",
     "email-addresses": "^5.0.0",
     "global-registry-nodejs-client": "https://github.com/CruGlobal/global-registry-nodejs-client.git",
-    "googleapis": "^99.0.0",
     "lodash": "^4.17.21",
     "request": "^2.88.0",
     "rollbar": "^2.24.1",
