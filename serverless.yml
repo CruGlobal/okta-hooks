@@ -1,14 +1,22 @@
 service: okta-hooks
+frameworkVersion: '3'
+configValidationMode: error
+useDotenv: true
+plugins:
+  - serverless-webpack
+  - serverless-dotenv-plugin
 
 provider:
   name: aws
   stage: ${env:ENVIRONMENT}
-  runtime: nodejs12.x
   region: us-east-1
   vpc:
     securityGroupIds:
-      - ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.webapp_elb_sg}
-    subnetIds: ${file(${env:ECS_CONFIG}/bin/vars.yml):us-east-1.prod_apps_1_all}
+      - sg-888294ed
+    subnetIds:
+      - subnet-f2c2dfda # us-east-1a
+      - subnet-1508db62 # us-east-1b
+      - subnet-3fd94266 # us-east-1c
   stackTags:
     Name: ${env:PROJECT_NAME}-${self:custom.environmentMap.${env:ENVIRONMENT}}
     owner: devops-engineering-team@cru.org
@@ -34,22 +42,14 @@ provider:
         - dynamodb:BatchWriteItem
       Resource:
         - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
-  environment: ${file(serverless/environment.js)}
 
 package:
   individually: true
-  exclude:
-    - .serverless/**
-    - .webpack/**
-    - .git/**
-    - test/**
-    - '**/*.test.js'
-    - '**/*.sql'
-    - .deployment/**
-
-plugins:
-  - '@cruglobal/serverless-merge-config'
-  - serverless-webpack
+  patterns:
+    - '!.webpack/**'
+    - '!test/**'
+    - '!**/*.test.js'
+    - '!.deployment/**'
 
 custom:
   webpack:
