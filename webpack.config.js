@@ -13,7 +13,7 @@ module.exports = (async () => {
   return {
     entry: slsw.lib.entries,
     target: 'node',
-    devtool: 'source-map',
+    devtool: 'hidden-source-map',
     mode: slsw.lib.webpack.isLocal ? 'development' : 'production',
     externals: [nodeExternals()],
     performance: {
@@ -26,6 +26,7 @@ module.exports = (async () => {
       process.env.CI
         ? new RollbarSourceMapPlugin({
             accessToken: process.env.ROLLBAR_ACCESS_TOKEN,
+            ignoreErrors: true,
             publicPath: '/var/task',
             version: version
           })
