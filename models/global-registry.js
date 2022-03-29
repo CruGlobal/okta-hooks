@@ -85,21 +85,25 @@ class GlobalRegistry {
         client_integration_id: profile.theKeyGuid,
         key_guid: profile.theKeyGuid
       },
-      ...(profile.usEmployeeId && !this.isProbablyTestAccount(profile.login) ? {
-        account_number: profile.usEmployeeId,
-        linked_identities: {
-          [PSHR_SYSTEM]: { account_number: profile.usEmployeeId },
-          [SIEBEL_SYSTEM]: { account_number: profile.usEmployeeId }
-        }
-      } : {
-        account_number: null
-      }),
-      ...(designationEntityId ? {
-        'designation:relationship': {
-          designation: designationEntityId,
-          client_integration_id: profile.theKeyGuid
-        }
-      } : {})
+      ...(profile.usEmployeeId && !this.isProbablyTestAccount(profile.login)
+        ? {
+            account_number: profile.usEmployeeId,
+            linked_identities: {
+              [PSHR_SYSTEM]: { account_number: profile.usEmployeeId },
+              [SIEBEL_SYSTEM]: { account_number: profile.usEmployeeId }
+            }
+          }
+        : {
+            account_number: null
+          }),
+      ...(designationEntityId
+        ? {
+            'designation:relationship': {
+              designation: designationEntityId,
+              client_integration_id: profile.theKeyGuid
+            }
+          }
+        : {})
     }
   }
 

@@ -44,7 +44,7 @@ describe('RestrictedDomains', () => {
       expect(result).toEqual(['cru.org', 'avengers.org', 'example.com'])
       expect(google.auth.JWT).toHaveBeenCalledWith({
         email: 'client@okta-hooks.example.com',
-        key: `-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n`,
+        key: '-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n',
         scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
       })
       expect(google.sheets).toHaveBeenCalledWith({ version: 'v4', auth: google.auth.JWT.mock.instances[0] })
@@ -83,7 +83,7 @@ describe('RestrictedDomains', () => {
       await new RestrictedDomains().syncDomainsFromGoogle()
       expect(DocumentClient._batchWriteMock).toHaveBeenCalledWith({
         RequestItems: {
-          'restricted_domains_dynamodb': [
+          restricted_domains_dynamodb: [
             { PutRequest: { Item: { DomainName: 'example.com' } } },
             { DeleteRequest: { Key: { DomainName: 'ccci.org' } } }
           ]

@@ -25,10 +25,10 @@ module.exports = (async () => {
       }),
       process.env.CI
         ? new RollbarSourceMapPlugin({
-          accessToken: process.env.ROLLBAR_ACCESS_TOKEN,
-          publicPath: '/var/task',
-          version: version
-        })
+            accessToken: process.env.ROLLBAR_ACCESS_TOKEN,
+            publicPath: '/var/task',
+            version: version
+          })
         : false
     ].filter(Boolean)
   }

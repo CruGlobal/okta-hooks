@@ -1,7 +1,7 @@
 import GUID from './guid'
-import uuid from 'uuid/v4'
+import { v4 as uuid } from 'uuid'
 
-jest.mock('uuid/v4')
+jest.mock('uuid')
 
 describe('GUID', () => {
   describe('static create()', () => {

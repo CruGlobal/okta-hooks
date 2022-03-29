@@ -1,6 +1,6 @@
 import GlobalRegistry, { PERSON_DESIGNATION_ENTITY_TYPE } from './global-registry'
 import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST } from 'global-registry-nodejs-client'
-import uuid from 'uuid/v4'
+import { v4 as uuid } from 'uuid'
 
 describe('GlobalRegistry', () => {
   let globalRegistry
