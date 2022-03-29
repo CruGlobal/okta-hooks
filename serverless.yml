@@ -187,7 +187,8 @@ functions:
           listenerArn:
             Ref: OktaLoadBalancerListener
           priority: 2
-          conditions: {} # conditions are handled in Resources block for verification lambda
+          conditions: # conditions required here but overwritten in Resources block.
+            path: /events
 
   events:
     handler: hooks/event/events.handler
