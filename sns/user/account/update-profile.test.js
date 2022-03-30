@@ -2,7 +2,7 @@ import { handler } from './update-profile'
 import rollbar from '../../../config/rollbar'
 import { mockGetUser } from '@okta/okta-sdk-nodejs'
 import GlobalRegistry from '../../../models/global-registry'
-import uuid from 'uuid/v4'
+import { v4 as uuid } from 'uuid'
 
 const mockCreateOrUpdateProfile = jest.fn()
 jest.mock('../../../config/rollbar')

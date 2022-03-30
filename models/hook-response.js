@@ -41,12 +41,14 @@ class HookResponse {
   buildBody () {
     return merge({}, {
       ...(this.commands.length ? { commands: this.commands } : {}),
-      ...(this.errors.length ? {
-        error: {
-          errorSummary: 'Errors were found in the user profile',
-          errorCauses: this.errors
-        }
-      } : {})
+      ...(this.errors.length
+        ? {
+            error: {
+              errorSummary: 'Errors were found in the user profile',
+              errorCauses: this.errors
+            }
+          }
+        : {})
     }, this.body)
   }
 
