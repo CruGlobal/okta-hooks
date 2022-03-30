@@ -3,10 +3,9 @@ name: Deploy Serverless Functions
 on:
   push:
     branches:
-      # Automatically build and deploy master and staging. Additional branches may be added.
+      # Automatically deploy master and staging. Additional branches may be added.
       - master
       - staging
-      - gha-deploy-serverless
   workflow_dispatch:
     # Allows manual build and deploy of any branch/ref
 
@@ -14,6 +13,4 @@ jobs:
   # Deploy Serverless functions
   deploy:
     name: Deploy
-    uses: CruGlobal/.github/.github/workflows/deploy-serverless.yml@serverless
-    with:
-      workflow-ref: serverless
+    uses: CruGlobal/.github/.github/workflows/deploy-serverless.yml@v1
