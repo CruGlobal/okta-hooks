@@ -1,6 +1,6 @@
 import RestrictedDomains from './restricted-domains'
 import { DynamoDB } from 'aws-sdk'
-import { google, mockSpreadsheetsGet } from 'googleapis'
+import { auth, sheets, mockSpreadsheetsGet } from '@googleapis/sheets'
 
 const DocumentClient = DynamoDB.DocumentClient
 
@@ -42,12 +42,12 @@ describe('RestrictedDomains', () => {
       mockSpreadsheetsGet.mockResolvedValue({ data: { values: [['cru.org'], ['Avengers.org'], ['example.com']] } })
       const result = await new RestrictedDomains().googleSheetDomains()
       expect(result).toEqual(['cru.org', 'avengers.org', 'example.com'])
-      expect(google.auth.JWT).toHaveBeenCalledWith({
+      expect(auth.JWT).toHaveBeenCalledWith({
         email: 'client@okta-hooks.example.com',
-        key: `-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n`,
+        key: '-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n',
         scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
       })
-      expect(google.sheets).toHaveBeenCalledWith({ version: 'v4', auth: google.auth.JWT.mock.instances[0] })
+      expect(sheets).toHaveBeenCalledWith({ version: 'v4', auth: auth.JWT.mock.instances[0] })
       expect(mockSpreadsheetsGet).toHaveBeenCalledWith({
         spreadsheetId: 'google_spreadsheet',
         range: "'Okta self-service prevention'!A2:A"
@@ -83,7 +83,7 @@ describe('RestrictedDomains', () => {
       await new RestrictedDomains().syncDomainsFromGoogle()
       expect(DocumentClient._batchWriteMock).toHaveBeenCalledWith({
         RequestItems: {
-          'restricted_domains_dynamodb': [
+          restricted_domains_dynamodb: [
             { PutRequest: { Item: { DomainName: 'example.com' } } },
             { DeleteRequest: { Key: { DomainName: 'ccci.org' } } }
           ]

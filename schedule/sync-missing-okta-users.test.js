@@ -41,7 +41,7 @@ describe('sync-missing-okta-users handler', () => {
   })
 
   it('should only publish a max of 100 users', async () => {
-    let users = []
+    const users = []
     for (let i = 0; i < 150; i++) {
       users.push({ id: `${i}` })
     }
