@@ -10,7 +10,7 @@ provider:
   region: us-east-1
   vpc:
     securityGroupIds:
-      - sg-0c870665760d904e0 # Default-LoadBalancer-Public
+      - sg-0c9ef2a8aa4869890 # Egress-Any-Public
     subnetIds:
       - subnet-f2c2dfda # us-east-1a
       - subnet-1508db62 # us-east-1b
@@ -106,7 +106,7 @@ resources:
         Scheme: internet-facing
         IpAddressType: ipv4
         SecurityGroups:
-          - sg-888294ed
+          - sg-0c870665760d904e0 # Default-LoadBalancer-Public
         Subnets:
           - subnet-f5c2dfdd # us-east-1a
           - subnet-2808db5f # us-east-1b
