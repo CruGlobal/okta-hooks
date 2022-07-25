@@ -10,7 +10,7 @@ provider:
   region: us-east-1
   vpc:
     securityGroupIds:
-      - sg-888294ed
+      - sg-0c870665760d904e0 # Default-LoadBalancer-Public
     subnetIds:
       - subnet-f2c2dfda # us-east-1a
       - subnet-1508db62 # us-east-1b
