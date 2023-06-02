@@ -28,7 +28,7 @@
     "serverless": "^3.32.2",
     "serverless-dotenv-plugin": "^3.12.2",
     "serverless-webpack": "^5.11.0",
-    "standard": "^17.1.0",
+    "standard": "^16.0.4",
     "webpack": "^5.85.0",
     "webpack-node-externals": "^3.0.0"
   },
