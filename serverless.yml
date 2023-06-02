@@ -6,6 +6,7 @@ plugins:
 
 provider:
   name: aws
+  runtime: nodejs16.x
   stage: ${env:ENVIRONMENT}
   region: us-east-1
   vpc:
@@ -42,8 +43,6 @@ provider:
             - dynamodb:BatchWriteItem
           Resource:
             - Fn::GetAtt: [ OktaRestrictedDomainsTable, Arn ]
-  layers:
-    - arn:aws:lambda:us-east-1:072686360478:layer:node-16_14_2:1
   environment: ${file(env.js)}
 
 package:
