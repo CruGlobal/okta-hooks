@@ -6,6 +6,7 @@ plugins:
 
 provider:
   name: aws
+  runtime: nodejs18.x
   stage: ${env:ENVIRONMENT}
   region: us-east-1
   vpc:
