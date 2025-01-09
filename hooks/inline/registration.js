@@ -8,6 +8,7 @@ export const handler = async (lambdaEvent) => {
   try {
     const response = new HookResponse()
     const registration = new RegistrationRequest(lambdaEvent.body)
+    console.log(JSON.stringify(registration))
     if (await RestrictedDomains.isRestricted(registration.login)) {
       response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'DENY' })
       response.addError({
@@ -21,6 +22,7 @@ export const handler = async (lambdaEvent) => {
       })
       response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'ALLOW' })
     }
+    console.log(JSON.stringify(response.toALBResponse()))
     return response.toALBResponse()
   } catch (error) {
     // Log error to rollbar
