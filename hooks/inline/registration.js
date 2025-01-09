@@ -6,6 +6,7 @@ import RegistrationRequest from '../../models/registration-request'
 
 export const handler = async (lambdaEvent) => {
   try {
+    console.log(JSON.stringify(lambdaEvent.body))
     const response = new HookResponse()
     const registration = new RegistrationRequest(lambdaEvent.body)
     console.log(JSON.stringify(registration))
@@ -17,10 +18,10 @@ export const handler = async (lambdaEvent) => {
         location: 'data.userProfile.login'
       })
     } else {
+      response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'ALLOW' })
       response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
         theKeyGuid: GUID.create()
       })
-      response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'ALLOW' })
     }
     console.log(JSON.stringify(response.toALBResponse()))
     return response.toALBResponse()
