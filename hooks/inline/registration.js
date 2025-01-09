@@ -19,6 +19,7 @@ export const handler = async (lambdaEvent) => {
       response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
         theKeyGuid: GUID.create()
       })
+      response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'ALLOW' })
     }
     return response.toALBResponse()
   } catch (error) {
