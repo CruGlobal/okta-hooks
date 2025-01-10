@@ -18,10 +18,9 @@ export const handler = async (lambdaEvent) => {
         location: 'data.userProfile.login'
       })
     } else {
-      response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'ALLOW' })
-      // response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
-      //   theKeyGuid: GUID.create()
-      // })
+      response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
+        theKeyGuid: GUID.create()
+      })
     }
     console.log(JSON.stringify(response.toALBResponse()))
     return response.toALBResponse()
