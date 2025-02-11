@@ -19,7 +19,8 @@ export const handler = async (lambdaEvent) => {
       })
     } else {
       response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
-        theKeyGuid: GUID.create()
+        theKeyGuid: GUID.create(),
+        orca: false, // Set ORCA to false on self-service registration
       })
     }
     console.log(JSON.stringify(response.toALBResponse()))
