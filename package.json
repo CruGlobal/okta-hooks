@@ -10,7 +10,7 @@
   "license": "BSD-3-Clause",
   "private": true,
   "engines": {
-    "node": "> 16.0.0"
+    "node": "> 22.0.0"
   },
   "scripts": {
     "lint": "standard --verbose",
