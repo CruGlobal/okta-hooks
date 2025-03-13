@@ -28,7 +28,7 @@ describe('registration hook', () => {
       body: JSON.stringify({
         commands: [{
           type: 'com.okta.user.profile.update',
-          value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false }
+          value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false, notes: 'Users who have a Staged or Provisioned status (are not yet Active) and have ORCA=F, should not see the Set Up Optional Security Methods screen during the Welcome Wizard.' }
         }]
       })
     })
