@@ -29,7 +29,7 @@ describe('registration hook', () => {
         commands: [{
           type: 'com.okta.user.profile.update',
           value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false }
-          }]
+        }]
       })
     })
   })
