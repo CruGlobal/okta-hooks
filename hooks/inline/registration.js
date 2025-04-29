@@ -18,8 +18,7 @@ export const handler = async (lambdaEvent) => {
     } else {
       response.addCommand(COMMAND_USER_PROFILE_UPDATE, {
         theKeyGuid: GUID.create(),
-        orca: false, // Set ORCA to false on self-service registration
-        Notes: 'Users who have a Staged or Provisioned status (are not yet Active) and have ORCA=F, should not see the Set Up Optional Security Methods screen during the Welcome Wizard.' // An Okta Rule will look for this Note (added only once and during SSR) and take appropriate action. Once the account is Active, an Okta Workflow will remove the Note.
+        orca: false
       })
     }
     return response.toALBResponse()
