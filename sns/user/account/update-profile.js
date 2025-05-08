@@ -19,6 +19,14 @@ export const handler = async (lambdaEvent) => {
       }
     }
 
+    // If email changed, and it doesn't match login, set login to the value of email and mark for update
+    if (request.changedAttributes.includes('email')) {
+      if (user.profile.email !== user.profile.login) {
+        user.profile.login = user.profile.email
+        hasUpdate = true
+      }
+    }
+
     // If theKeyGuid is set and something changed, update Global Registry, mark for update if GR changed profile
     if (user.profile.theKeyGuid && user.status !== 'DEPROVISIONED' && request.changedAttributes.length > 0) {
       if (await globalRegistry.createOrUpdateProfile(user.profile)) {
