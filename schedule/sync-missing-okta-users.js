@@ -7,7 +7,8 @@ export const handler = async (lambdaEvent) => {
   const sns = new SNS({ apiVersion: '2010-03-31', region: 'us-east-1' })
   try {
     const processed = []
-    (await okta.groupApi.listGroupUsers({groupId: process.env.OKTA_MISSING_GROUP_ID, limit: 25 })).each(user => {
+    const users = await okta.groupApi.listGroupUsers({groupId: process.env.OKTA_MISSING_GROUP_ID, limit: 25 })
+    await users.each(user => {
       if (processed.length >= 100) {
         return false
       }
