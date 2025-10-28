@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@googleapis/sheets": "^2.0.1",
-    "@okta/okta-sdk-nodejs": "^6.4.0",
+    "@okta/okta-sdk-nodejs": "^7.3.0",
     "aws-sdk": "^2.1101.0",
     "email-addresses": "^5.0.0",
     "global-registry-nodejs-client": "https://github.com/CruGlobal/global-registry-nodejs-client.git",
