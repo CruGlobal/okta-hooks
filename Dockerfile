@@ -29,6 +29,7 @@ ARG BUILD_NUMBER
 ENV PROJECT_NAME=${PROJECT_NAME}
 ENV ENVIRONMENT=${ENVIRONMENT}
 ENV BUILD_NUMBER=${BUILD_NUMBER}
+ENV NODE_OPTIONS=--enable-source-maps
 
 # Set the Lambda task root directory
 WORKDIR ${LAMBDA_TASK_ROOT}
@@ -36,7 +37,6 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 # Copy the secrets-lambda-extension from the extension stage and setup wrapper
 COPY --from=extension /opt/secrets-lambda-extension /opt/secrets-lambda-extension
 ENV AWS_LAMBDA_EXEC_WRAPPER=/opt/secrets-lambda-extension/secrets-wrapper
-ENV NODE_OPTIONS=--enable-source-maps
 
 # Setup DataDog metrics/logs
 RUN npm install datadog-lambda-js dd-trace

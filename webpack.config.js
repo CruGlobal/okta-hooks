@@ -22,6 +22,9 @@ module.exports = {
     sync_restricted_domains: './schedule/sync-restricted-domains.js',
     sync_missing_okta_users: './schedule/sync-missing-okta-users.js'
   },
+  resolve: {
+    mainFields: ['main', 'module']
+  },
   output: {
     path: path.resolve(__dirname, 'dist'),
     chunkFormat: false,
