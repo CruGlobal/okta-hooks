@@ -9,7 +9,7 @@ export const handler = async (lambdaEvent) => {
   const globalRegistry = new GlobalRegistry(process.env.GLOBAL_REGISTRY_TOKEN, process.env.GLOBAL_REGISTRY_URL)
   try {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)
-    const user = await okta.getUser(request.userId)
+    const user = await okta.userApi.getUser({userId: request.userId})
     if (typeof user.profile.theKeyGuid === 'undefined') {
       user.profile.theKeyGuid = GUID.create()
     }
