@@ -8,7 +8,7 @@ export const handler = async (lambdaEvent) => {
   const globalRegistry = new GlobalRegistry(process.env.GLOBAL_REGISTRY_TOKEN, process.env.GLOBAL_REGISTRY_URL)
   try {
     const event = new OktaEvent(lambdaEvent.Records[0].Sns.Message)
-    const user = await okta.getUser(event.userId)
+    const user = await okta.userApi.getUser({userId: event.userId})
     switch (user.status) {
       case 'ACTIVE':
         if (await globalRegistry.createOrUpdateProfile(user.profile)) {
