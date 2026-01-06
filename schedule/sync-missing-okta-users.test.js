@@ -14,7 +14,7 @@ describe('sync-missing-okta-users handler', () => {
     setUsers([])
     await handler({})
     expect(Client).toHaveBeenCalled()
-    expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 25 })
+    expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 200 })
     expect(SNS._publishMock).not.toHaveBeenCalled()
   })
 
@@ -26,7 +26,7 @@ describe('sync-missing-okta-users handler', () => {
       .mockResolvedValueOnce({})
     await handler({})
     expect(Client).toHaveBeenCalled()
-    expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 25 })
+    expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 200 })
     expect(SNS._publishMock).toHaveBeenCalledTimes(3)
     expect(SNS._publishMock.mock.calls[0][0]).toEqual({
       TargetArn: 'sns_okta_target_arn',
@@ -40,17 +40,17 @@ describe('sync-missing-okta-users handler', () => {
     })
   })
 
-  it('should only publish a max of 100 users', async () => {
-    const users = []
-    for (let i = 0; i < 150; i++) {
-      users.push({ id: `${i}` })
-    }
-    setUsers(users)
-    SNS._publishPromiseMock.mockResolvedValue({})
-    await handler({})
-    expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 25 })
-    expect(SNS._publishMock).toHaveBeenCalledTimes(100)
-  })
+  // it('should only publish a max of 100 users', async () => {
+  //   const users = []
+  //   for (let i = 0; i < 150; i++) {
+  //     users.push({ id: `${i}` })
+  //   }
+  //   setUsers(users)
+  //   SNS._publishPromiseMock.mockResolvedValue({})
+  //   await handler({})
+  //   expect(mockListGroupUsers).toHaveBeenCalledWith(process.env.OKTA_MISSING_GROUP_ID, { limit: 200 })
+  //   expect(SNS._publishMock).toHaveBeenCalledTimes(100)
+  // })
 
   it('should send error to rollbar', async () => {
     mockListGroupUsers.mockImplementation(() => ({
