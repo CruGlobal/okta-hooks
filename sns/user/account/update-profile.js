@@ -2,6 +2,7 @@ import { Client } from '@okta/okta-sdk-nodejs'
 import rollbar from '../../../config/rollbar'
 import OktaEvent from '../../../models/okta-event'
 import GlobalRegistry from '../../../models/global-registry'
+import GUID from '../../../models/guid'
 
 export const handler = async (lambdaEvent) => {
   const okta = new Client({ cacheMiddleware: null })
@@ -17,6 +18,12 @@ export const handler = async (lambdaEvent) => {
         user.profile.email = user.profile.login
         hasUpdate = true
       }
+    }
+
+    // Generate theKeyGuid if missing
+    if (typeof user.profile.theKeyGuid === 'undefined') {
+      user.profile.theKeyGuid = GUID.create()
+      hasUpdate = true
     }
 
     // If theKeyGuid is set and something changed, update Global Registry, mark for update if GR changed profile

@@ -2,6 +2,7 @@ import { handler } from './update-profile'
 import rollbar from '../../../config/rollbar'
 import { mockGetUser } from '@okta/okta-sdk-nodejs'
 import GlobalRegistry from '../../../models/global-registry'
+import GUID from '../../../models/guid'
 import { v4 as uuid } from 'uuid'
 
 const mockCreateOrUpdateProfile = jest.fn()
@@ -29,11 +30,13 @@ describe('user.account.update_profile SNS message', () => {
   })
 
   it('should update user if login/email has changed', async () => {
+    profile.theKeyGuid = uuid()
+    mockCreateOrUpdateProfile.mockResolvedValue(false)
     await handler(updateProfileEvent)
     expect(GlobalRegistry).toHaveBeenCalledWith('secret', 'https://example.com')
     expect(mockGetUser).toHaveBeenCalledWith('00uo48gsq4ujEWoXJ0h7')
     expect(profile.email).toEqual(profile.login)
-    expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()
+    expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
     expect(mockUpdate).toHaveBeenCalled()
   })
 
@@ -55,8 +58,20 @@ describe('user.account.update_profile SNS message', () => {
     expect(mockUpdate).not.toHaveBeenCalled()
   })
 
+  it('should generate theKeyGuid if missing', async () => {
+    jest.spyOn(GUID, 'create').mockReturnValue('58ae8a88-878c-47a8-a22e-543665b7fe33')
+    mockCreateOrUpdateProfile.mockResolvedValue(false)
+    await handler({ Records: [{ Sns: { Message: JSON.stringify({ debugContext: { debugData: { changedAttributes: 'Notes' } } }) } }] })
+    expect(mockGetUser).toHaveBeenCalled()
+    expect(profile.theKeyGuid).toEqual('58ae8a88-878c-47a8-a22e-543665b7fe33')
+    expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
+    expect(mockUpdate).toHaveBeenCalled()
+  })
+
   it('should do nothing if login and email are the same', async () => {
     profile.login = 'hawkeye@avengers.org'
+    profile.theKeyGuid = uuid()
+    mockCreateOrUpdateProfile.mockResolvedValue(false)
     await handler(updateProfileEvent)
     expect(mockGetUser).toHaveBeenCalledWith('00uo48gsq4ujEWoXJ0h7')
     expect(mockUpdate).not.toHaveBeenCalled()
