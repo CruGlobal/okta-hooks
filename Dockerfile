@@ -44,4 +44,4 @@ COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/. /opt/
 CMD ["node_modules/datadog-lambda-js/dist/handler.handler"]
 
 # Copy the built application from the builder stage
-COPY --from=builder /app/dist/* ./
+COPY --from=builder /app/dist ./
