@@ -16,27 +16,22 @@ const handlerMap = {
 }
 
 // Build each handler as a separate bundle with flat output
+// Using CommonJS format for DataDog Lambda layer compatibility
 for (const [input, output] of Object.entries(handlerMap)) {
   await esbuild.build({
     entryPoints: [input],
     bundle: true,
     platform: 'node',
     target: 'node22',
-    outfile: `dist/${output}.mjs`,
+    outfile: `dist/${output}.js`,
     sourcemap: true,
-    format: 'esm',
+    format: 'cjs',
     external: [
       // AWS SDK v3 is included in Lambda runtime
       '@aws-sdk/*'
     ],
     define: {
       'process.env.SOURCEMAP_VERSION': JSON.stringify(version)
-    },
-    banner: {
-      js: `
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-`.trim()
     }
   })
 }
