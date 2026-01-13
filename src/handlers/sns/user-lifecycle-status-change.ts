@@ -16,7 +16,7 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
     switch (user.status) {
       case 'ACTIVE':
         if (await globalRegistry.createOrUpdateProfile(user.profile)) {
-          await user.update()
+          await okta.userApi.updateUser({ userId: event.userId!, user })
         }
         break
       case 'DEPROVISIONED':

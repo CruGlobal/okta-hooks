@@ -39,7 +39,7 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
 
     // Fire user update if marked for update
     if (hasUpdate) {
-      await user.update()
+      await okta.userApi.updateUser({ userId: request.userId!, user })
     }
   } catch (error) {
     await rollbar.error('user.account.update_profile Error', error as Error, { lambdaEvent })

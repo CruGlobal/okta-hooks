@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handler } from '@/handlers/sns/user-account-update-profile.js'
 import rollbar from '@/config/rollbar.js'
-import { mockGetUser } from '../../mocks/okta-sdk-nodejs.js'
+import { mockGetUser, mockUpdateUser } from '../../mocks/okta-sdk-nodejs.js'
 import GlobalRegistry from '@/models/global-registry.js'
 import { v4 as uuid } from 'uuid'
 
@@ -17,20 +17,16 @@ vi.mock('@/models/global-registry.js', () => ({
 }))
 vi.mock('@okta/okta-sdk-nodejs', async () => {
   const mock = await import('../../mocks/okta-sdk-nodejs.js')
-  return { Client: mock.Client, mockGetUser: mock.mockGetUser }
+  return { Client: mock.Client, mockGetUser: mock.mockGetUser, mockUpdateUser: mock.mockUpdateUser }
 })
 
 describe('user.account.update_profile SNS message', () => {
-  let profile: Record<string, unknown>, mockUpdate: ReturnType<typeof vi.fn>
+  let profile: Record<string, unknown>, user: Record<string, unknown>
   beforeEach(() => {
     vi.clearAllMocks()
     profile = { login: 'ronin@avangers.org', email: 'hawkeye@avengers.org' }
-    mockUpdate = vi.fn()
-    mockGetUser.mockResolvedValue({
-      profile,
-      status: 'ACTIVE',
-      update: mockUpdate
-    })
+    user = { profile, status: 'ACTIVE' }
+    mockGetUser.mockResolvedValue(user)
   })
 
   it('should update user if login/email has changed', async () => {
@@ -39,7 +35,7 @@ describe('user.account.update_profile SNS message', () => {
     expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo48gsq4ujEWoXJ0h7' })
     expect(profile.email).toEqual(profile.login)
     expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()
-    expect(mockUpdate).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalledWith({ userId: '00uo48gsq4ujEWoXJ0h7', user })
   })
 
   it('should update user if profile was updated', async () => {
@@ -48,7 +44,7 @@ describe('user.account.update_profile SNS message', () => {
     await handler({ Records: [{ Sns: { Message: JSON.stringify({ debugContext: { debugData: { changedAttributes: 'firstName' } } }) } }] } as any)
     expect(mockGetUser).toHaveBeenCalled()
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
-    expect(mockUpdate).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalledWith({ userId: undefined, user })
   })
 
   it('should do nothing if nothing was changed', async () => {
@@ -57,14 +53,14 @@ describe('user.account.update_profile SNS message', () => {
     await handler({ Records: [{ Sns: { Message: JSON.stringify({ debugContext: { debugData: { changedAttributes: 'firstName' } } }) } }] } as any)
     expect(mockGetUser).toHaveBeenCalled()
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
-    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockUpdateUser).not.toHaveBeenCalled()
   })
 
   it('should do nothing if login and email are the same', async () => {
     profile.login = 'hawkeye@avengers.org'
     await handler(updateProfileEvent as any)
     expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo48gsq4ujEWoXJ0h7' })
-    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockUpdateUser).not.toHaveBeenCalled()
   })
 
   it('should report error to rollbar', async () => {

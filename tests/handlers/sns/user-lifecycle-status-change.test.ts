@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handler } from '@/handlers/sns/user-lifecycle-status-change.js'
 import rollbar from '@/config/rollbar.js'
-import { mockGetUser } from '../../mocks/okta-sdk-nodejs.js'
+import { mockGetUser, mockUpdateUser } from '../../mocks/okta-sdk-nodejs.js'
 
 import deactivateEvent from '../../fixtures/sns/user-lifecycle-deactivate.json'
 import reactivateEvent from '../../fixtures/sns/user-lifecycle-reactivate.json'
@@ -18,10 +18,8 @@ vi.mock('@/models/global-registry.js', () => ({
 }))
 vi.mock('@okta/okta-sdk-nodejs', async () => {
   const mock = await import('../../mocks/okta-sdk-nodejs.js')
-  return { Client: mock.Client, mockGetUser: mock.mockGetUser }
+  return { Client: mock.Client, mockGetUser: mock.mockGetUser, mockUpdateUser: mock.mockUpdateUser }
 })
-
-const mockUpdate = vi.fn()
 
 describe('status change handler', () => {
   beforeEach(() => {
@@ -32,44 +30,37 @@ describe('status change handler', () => {
     it('should delete profile from GR', async () => {
       mockGetUser.mockResolvedValue({
         status: 'DEPROVISIONED',
-        profile: {},
-        update: mockUpdate
+        profile: {}
       })
 
       await handler(deactivateEvent as any)
       expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
       expect(mockDeleteProfile).toHaveBeenCalledWith({})
-      expect(mockUpdate).not.toHaveBeenCalled()
+      expect(mockUpdateUser).not.toHaveBeenCalled()
     })
   })
 
   describe('user.lifecycle.reactivate SNS message', () => {
     it('should create profile in GR', async () => {
-      mockGetUser.mockResolvedValue({
-        status: 'ACTIVE',
-        profile: {},
-        update: mockUpdate
-      })
+      const user = { status: 'ACTIVE', profile: {} }
+      mockGetUser.mockResolvedValue(user)
       mockCreateOrUpdateProfile.mockResolvedValue(false)
 
       await handler(reactivateEvent as any)
       expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
       expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith({})
-      expect(mockUpdate).not.toHaveBeenCalled()
+      expect(mockUpdateUser).not.toHaveBeenCalled()
     })
 
     it('should update okta user when profile was modified in GR', async () => {
-      mockGetUser.mockResolvedValue({
-        status: 'ACTIVE',
-        profile: {},
-        update: mockUpdate
-      })
+      const user = { status: 'ACTIVE', profile: {} }
+      mockGetUser.mockResolvedValue(user)
       mockCreateOrUpdateProfile.mockResolvedValue(true)
 
       await handler(reactivateEvent as any)
       expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
       expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith({})
-      expect(mockUpdate).toHaveBeenCalled()
+      expect(mockUpdateUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7', user })
     })
   })
 
