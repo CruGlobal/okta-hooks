@@ -81,4 +81,22 @@ describe('registration hook', () => {
     expect(rollbar.error)
       .toHaveBeenCalledWith('registration hook Error', expect.any(Error), { lambdaEvent: registrationEvent })
   })
+
+  it('should handle null body gracefully', async () => {
+    const eventWithNullBody = { ...registrationEvent, body: null }
+    const response = await handler(eventWithNullBody as any)
+    expect(response).toStrictEqual({
+      statusCode: 204,
+      statusDescription: '204 No Content',
+      isBase64Encoded: false,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8'
+      }
+    })
+    expect(rollbar.error).toHaveBeenCalledWith(
+      'registration hook Error',
+      expect.any(Error),
+      { lambdaEvent: eventWithNullBody }
+    )
+  })
 })
