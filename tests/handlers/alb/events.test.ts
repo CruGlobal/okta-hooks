@@ -14,8 +14,11 @@ vi.mock('@aws-sdk/client-sns', async () => {
 })
 
 describe('events hook', () => {
+  const originalBlockList = process.env.OKTA_ACTOR_ID_BLOCK_LIST
+
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.OKTA_ACTOR_ID_BLOCK_LIST = originalBlockList
   })
 
   it('should forward event to SNS', async () => {
@@ -80,5 +83,36 @@ describe('events hook', () => {
         }
       }
     })
+  })
+
+  it('should handle undefined block list', async () => {
+    delete process.env.OKTA_ACTOR_ID_BLOCK_LIST
+    mockSNSSend.mockResolvedValue({})
+    const response = await handler(created as any)
+    expect(response).toStrictEqual({
+      statusCode: 204,
+      statusDescription: '204 No Content',
+      isBase64Encoded: false,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8'
+      }
+    })
+    expect(mockSNSSend).toHaveBeenCalled()
+  })
+
+  it('should handle null body gracefully', async () => {
+    mockSNSSend.mockResolvedValue({})
+    const eventWithNullBody = { ...created, body: null }
+    const response = await handler(eventWithNullBody as any)
+    expect(response).toStrictEqual({
+      statusCode: 500,
+      statusDescription: '500 Internal Server Error',
+      isBase64Encoded: false,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      body: '{}'
+    })
+    expect(rollbar.error).toHaveBeenCalled()
   })
 })

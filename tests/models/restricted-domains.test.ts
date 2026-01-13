@@ -55,6 +55,12 @@ describe('RestrictedDomains', () => {
       const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
       expect(result).toBeFalsy()
     })
+
+    it('should return false for invalid email address', async () => {
+      const result = await RestrictedDomains.isRestricted('not-a-valid-email')
+      expect(result).toBeFalsy()
+      expect(mockDynamoDBSend).not.toHaveBeenCalled()
+    })
   })
 
   describe('allDomains()', () => {
@@ -63,6 +69,12 @@ describe('RestrictedDomains', () => {
       const result = await new RestrictedDomains().allDomains()
       expect(result).toEqual(['cru.org', 'avengers.org'])
       expect(ScanCommand).toHaveBeenCalledWith({ TableName: 'restricted_domains_dynamodb' })
+    })
+
+    it('should return empty array when Items is undefined', async () => {
+      mockDynamoDBSend.mockResolvedValue({})
+      const result = await new RestrictedDomains().allDomains()
+      expect(result).toEqual([])
     })
   })
 

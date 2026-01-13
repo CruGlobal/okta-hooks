@@ -57,6 +57,20 @@ describe('status change handler', () => {
       expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith({})
       expect(mockUpdate).not.toHaveBeenCalled()
     })
+
+    it('should update okta user when profile was modified in GR', async () => {
+      mockGetUser.mockResolvedValue({
+        status: 'ACTIVE',
+        profile: {},
+        update: mockUpdate
+      })
+      mockCreateOrUpdateProfile.mockResolvedValue(true)
+
+      await handler(reactivateEvent as any)
+      expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
+      expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith({})
+      expect(mockUpdate).toHaveBeenCalled()
+    })
   })
 
   it('should send error to rollbar', async () => {

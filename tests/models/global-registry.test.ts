@@ -268,5 +268,35 @@ describe('GlobalRegistry', () => {
       expect(profile.thekeyGrPersonId).toEqual(null)
       expect(profile.grMasterPersonId).toEqual(null)
     })
+
+    it('should skip entities without person.id', async () => {
+      const profile = { theKeyGuid: uuid(), thekeyGrPersonId: uuid(), grMasterPersonId: uuid() } as any
+      const person1 = uuid()
+      mockEntityGET.mockResolvedValue({
+        entities: [
+          { person: { id: person1 } },
+          { person: {} },
+          { other: { id: uuid() } }
+        ]
+      })
+      mockEntityDELETE.mockResolvedValue({})
+      vi.spyOn(globalRegistry, 'deleteDesignationRelationshipIfNecessary')
+
+      expect(await globalRegistry.deleteProfile(profile)).toBeTruthy()
+      expect(mockEntityDELETE).toHaveBeenCalledTimes(1)
+      expect(mockEntityDELETE).toHaveBeenCalledWith(person1)
+    })
+
+    it('should handle undefined entities in response', async () => {
+      const profile = { theKeyGuid: uuid(), thekeyGrPersonId: uuid(), grMasterPersonId: uuid() } as any
+      mockEntityGET.mockResolvedValue({})
+      mockEntityDELETE.mockResolvedValue({})
+      vi.spyOn(globalRegistry, 'deleteDesignationRelationshipIfNecessary')
+
+      expect(await globalRegistry.deleteProfile(profile)).toBeTruthy()
+      expect(mockEntityDELETE).not.toHaveBeenCalled()
+      expect(profile.thekeyGrPersonId).toEqual(null)
+      expect(profile.grMasterPersonId).toEqual(null)
+    })
   })
 })
