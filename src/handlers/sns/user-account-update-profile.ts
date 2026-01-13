@@ -31,6 +31,7 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
       user.status !== 'DEPROVISIONED' &&
       request.changedAttributes.length > 0
     ) {
+      console.log(`Updating profile: okta=${request.userId} gr=${user.profile?.thekeyGrPersonId}`)
       if (await globalRegistry.createOrUpdateProfile(user.profile)) {
         hasUpdate = true
       }
