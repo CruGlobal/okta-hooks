@@ -9,13 +9,13 @@ Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider regi
 ## Common Commands
 
 ```bash
-yarn lint        # Run Standard linter
-yarn test        # Run Jest tests with coverage
+npm run lint        # Run Standard linter
+npm run test        # Run Jest tests with coverage
 ```
 
 To run a single test file:
 ```bash
-yarn test path/to/file.test.js
+npm run test path/to/file.test.js
 ```
 
 ## Architecture
