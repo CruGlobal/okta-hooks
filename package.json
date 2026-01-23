@@ -45,7 +45,7 @@
     "email-addresses": "^5.0.0",
     "encoding": "^0.1.13",
     "global-registry-nodejs-client": "https://github.com/CruGlobal/global-registry-nodejs-client.git",
-    "lodash": "^4.17.21",
+    "lodash": "^4.17.23",
     "request": "^2.88.0",
     "rollbar": "^2.26.5",
     "source-map-support": "^0.5.21",
