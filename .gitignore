@@ -15,3 +15,5 @@ dist
 
 # Jenkins deployment work directory
 .deployment/
+cru-terraform-modules
+okta-hooks-terraform-config
