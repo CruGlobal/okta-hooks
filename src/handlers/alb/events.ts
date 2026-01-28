@@ -26,7 +26,7 @@ export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
     )
     return new HookResponse({ statusCode: 204 }).toALBResponse()
   } catch (error) {
-    rollbar.error('events hook Error', error as Error, { lambdaEvent })
+    await rollbar.error('events hook Error', error as Error, { lambdaEvent })
     // Return 500 to okta to allow it to retry
     return new HookResponse({ statusCode: 500 }).toALBResponse()
   }

@@ -9,53 +9,56 @@ Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider regi
 ## Common Commands
 
 ```bash
-npm run lint        # Run Standard linter
-npm run test        # Run Jest tests with coverage
+npm run lint        # Run ESLint
+npm run lint:fix    # Run ESLint with auto-fix
+npm run test        # Run Vitest tests with coverage
+npm run test:watch  # Run Vitest in watch mode
+npm run typecheck   # Run TypeScript type checking
+npm run build       # Build Lambda handlers with esbuild
 ```
 
 To run a single test file:
 ```bash
-npm run test path/to/file.test.js
+npm run test tests/path/to/file.test.ts
 ```
 
 ## Architecture
 
-**Lambda Functions:**
+**Lambda Handlers** (`src/handlers/`):
 
-1. **Inline Hook - Registration** (`hooks/inline/registration.js`)
-   - Validates new user registrations, generates GUIDs, blocks restricted email domains
-   - Triggered via ALB from Okta inline hook
+1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains
+   - `verification.ts` - Verification endpoint for Okta hook setup
+   - `events.ts` - Event hook: routes Okta events to SNS topic
 
-2. **Event Hook - Events** (`hooks/event/events.js`)
-   - Routes Okta events to SNS topic, filters blocked actor IDs
+2. **SNS Handlers** (`sns/`) - Triggered by SNS messages
+   - `user-lifecycle-create.ts` - Creates profiles in Global Registry on user creation
+   - `user-lifecycle-status-change.ts` - Handles deactivation/reactivation events
+   - `user-account-update-profile.ts` - Syncs profile and email changes
 
-3. **SNS Handlers** (`sns/user/`)
-   - `lifecycle/create.js` - Creates profiles in Global Registry on user creation
-   - `lifecycle/status-change.js` - Handles deactivation/reactivation events
-   - `account/update-profile.js` - Syncs profile and email changes
+3. **Scheduled Handlers** (`schedule/`)
+   - `sync-restricted-domains.ts` - Syncs restricted domains from Google Sheets to DynamoDB (every 3 hours)
+   - `sync-missing-okta-users.ts` - Re-syncs users missing Global Registry IDs (every 30 minutes)
 
-4. **Scheduled Tasks** (`schedule/`)
-   - `sync-restricted-domains.js` - Syncs restricted domains from Google Sheets to DynamoDB (every 3 hours)
-   - `sync-missing-okta-users.js` - Re-syncs users missing Global Registry IDs (every 30 minutes)
-
-**Key Models** (`models/`):
-- `HookResponse` - Builds Okta hook response format
+**Models** (`src/models/`):
+- `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - DynamoDB + Google Sheets integration
+- `RestrictedDomains` - DynamoDB + Google Sheets integration for blocked email domains
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
 ## Code Conventions
 
-- ES6 modules with `import`/`export` syntax
-- Lambda handlers export `handler` function receiving `lambdaEvent`
-- Test files colocated with source files as `*.test.js`
-- Lodash used for utility functions
+- TypeScript with ES modules (`import`/`export`)
+- Lambda handlers export `handler` function receiving typed AWS Lambda events
+- Test files in `tests/` directory mirroring `src/` structure as `*.test.ts`
+- Uses Vitest with globals enabled (no need to import `describe`, `it`, `expect`)
+- Path alias `@/` maps to `src/` directory
 - Rollbar for error tracking
 - Environment variables for all external configuration
 
-## Deployment
+## Build & Deployment
 
-Uses Serverless Framework v3 with serverless-webpack plugin. Configuration in `serverless.yml` defines:
-- Lambda functions with ALB/SNS/schedule triggers
-- SNS topic and DynamoDB table resources
-- VPC/security group configuration
+Uses esbuild (`esbuild.config.mjs`) to bundle handlers:
+- Each handler is bundled separately to `dist/` as CommonJS (for DataDog Lambda layer compatibility)
+- AWS SDK v3 is externalized (included in Lambda runtime)
+- Infrastructure managed via Terraform (linked at `okta-hooks-terraform-config`)
