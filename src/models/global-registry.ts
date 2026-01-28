@@ -49,9 +49,15 @@ class GlobalRegistry {
     )
 
     const personId = get(result, 'entity.person.id') as string | undefined
-    const masterPersonId = get(result, 'entity.person.master_person:relationship.master_person') as
-      | string
+    const masterPersonRelationship = get(result, 'entity.person.master_person:relationship') as
+      | { master_person?: string }
+      | { master_person?: string }[]
       | undefined
+    const masterPersonId = (
+      Array.isArray(masterPersonRelationship)
+        ? masterPersonRelationship[0]?.master_person
+        : masterPersonRelationship?.master_person
+    ) as string | undefined
     if (
       !equalsIgnoreCase(personId, profile.thekeyGrPersonId) ||
       !equalsIgnoreCase(masterPersonId, profile.grMasterPersonId)

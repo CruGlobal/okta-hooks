@@ -236,6 +236,25 @@ describe('GlobalRegistry', () => {
       expect(profile.grMasterPersonId).toEqual(masterPersonId)
     })
 
+    it('should handle master_person:relationship as an array', async () => {
+      const personId = uuid()
+      const masterPersonId = uuid()
+      mockEntityPOST.mockResolvedValue({
+        entity: {
+          person: {
+            id: personId,
+            'master_person:relationship': [
+              { master_person: masterPersonId, relationship_entity_id: uuid() },
+              { master_person: masterPersonId, relationship_entity_id: uuid() }
+            ]
+          }
+        }
+      })
+      expect(await globalRegistry.createOrUpdateProfile(profile)).toBeTruthy()
+      expect(profile.thekeyGrPersonId).toEqual(personId)
+      expect(profile.grMasterPersonId).toEqual(masterPersonId)
+    })
+
     it('should return false if profile did not change', async () => {
       profile.thekeyGrPersonId = uuid()
       profile.grMasterPersonId = uuid()
