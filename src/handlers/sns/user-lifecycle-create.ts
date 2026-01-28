@@ -18,7 +18,7 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
       user.profile.theKeyGuid = GUID.create()
     }
     await globalRegistry.createOrUpdateProfile(user.profile)
-    await user.update()
+    await okta.userApi.updateUser({ userId: request.userId!, user })
   } catch (error) {
     await rollbar.error('user.lifecycle.create Error', error as Error, { lambdaEvent })
     throw error

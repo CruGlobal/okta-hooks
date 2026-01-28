@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handler } from '@/handlers/sns/user-lifecycle-create.js'
 import rollbar from '@/config/rollbar.js'
-import { Client, mockGetUser } from '../../mocks/okta-sdk-nodejs.js'
+import { Client, mockGetUser, mockUpdateUser } from '../../mocks/okta-sdk-nodejs.js'
 import GUID from '@/models/guid.js'
 
 import created from '../../fixtures/sns/user-lifecycle-create.json'
@@ -25,32 +25,24 @@ describe('user.lifecycle.create SNS message', () => {
   })
 
   it('does nothing if user already has `theKeyGuid`', async () => {
-    const mockUpdate = vi.fn()
     const profile = { theKeyGuid: '58ae8a88-878c-47a8-a22e-543665b7fe33' }
     mockCreateOrUpdateProfile.mockResolvedValue(true)
-    mockGetUser.mockResolvedValue({
-      profile,
-      update: mockUpdate
-    })
+    mockGetUser.mockResolvedValue({ profile })
     await handler(created as any)
     expect(Client).toHaveBeenCalled()
     expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
-    expect(mockUpdate).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalled()
   })
 
   it('updates user profile with new `theKeyGuid` if its missing', async () => {
     vi.spyOn(GUID, 'create').mockReturnValue('58ae8a88-878c-47a8-a22e-543665b7fe33')
-    const mockUpdate = vi.fn().mockResolvedValue({})
     mockCreateOrUpdateProfile.mockResolvedValue(true)
     const profile: Record<string, unknown> = {}
-    mockGetUser.mockResolvedValue({
-      profile,
-      update: mockUpdate
-    })
+    mockGetUser.mockResolvedValue({ profile })
     await handler(created as any)
     expect(profile.theKeyGuid).toEqual('58ae8a88-878c-47a8-a22e-543665b7fe33')
-    expect(mockUpdate).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalled()
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
   })
 
