@@ -21,14 +21,13 @@ export const handler = async (lambdaEvent: ScheduledEvent): Promise<void> => {
           new PublishCommand({
             TargetArn: process.env.SNS_OKTA_EVENTS_ARN!,
             Message: JSON.stringify({
-              eventType: 'user.account.update_profile',
-              target: [{ id: user.id }],
-              debugContext: { debugData: { changedAttributes: 'Notes' } }
+              eventType: 'user.lifecycle.create',
+              target: [{ id: user.id }]
             }),
             MessageAttributes: {
               eventType: {
                 DataType: 'String',
-                StringValue: 'user.account.update_profile'
+                StringValue: 'user.lifecycle.create'
               }
             }
           })
