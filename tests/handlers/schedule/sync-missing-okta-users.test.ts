@@ -31,7 +31,7 @@ describe('sync-missing-okta-users handler', () => {
     expect(mockSNSSend).not.toHaveBeenCalled()
   })
 
-  it('should publish `user.account.update_profile` for each user', async () => {
+  it('should publish `user.lifecycle.create` for each user', async () => {
     setUsers([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
     mockSNSSend
       .mockResolvedValueOnce({})
@@ -43,11 +43,11 @@ describe('sync-missing-okta-users handler', () => {
     expect(mockSNSSend).toHaveBeenCalledTimes(3)
     expect(PublishCommand).toHaveBeenCalledWith({
       TargetArn: 'sns_okta_target_arn',
-      Message: '{"eventType":"user.account.update_profile","target":[{"id":"a"}],"debugContext":{"debugData":{"changedAttributes":"Notes"}}}',
+      Message: '{"eventType":"user.lifecycle.create","target":[{"id":"a"}]}',
       MessageAttributes: {
         eventType: {
           DataType: 'String',
-          StringValue: 'user.account.update_profile'
+          StringValue: 'user.lifecycle.create'
         }
       }
     })
