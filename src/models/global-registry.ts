@@ -7,6 +7,7 @@ export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designa
 export const THE_KEY_SYSYEM = 'the_key'
 export const PSHR_SYSTEM = 'pshr'
 export const SIEBEL_SYSTEM = 'siebel'
+export const HCM_SYSTEM = 'hcm'
 
 interface OktaUserProfile {
   theKeyGuid: string
@@ -123,13 +124,16 @@ class GlobalRegistry {
       ...(profile.usEmployeeId && !this.isProbablyTestAccount(profile.login)
         ? {
             account_number: profile.usEmployeeId,
+            hcm_person_number: profile.usEmployeeId,
             linked_identities: {
+              [HCM_SYSTEM]: { hcm_person_number: profile.usEmployeeId },
               [PSHR_SYSTEM]: { account_number: profile.usEmployeeId },
               [SIEBEL_SYSTEM]: { account_number: profile.usEmployeeId }
             }
           }
         : {
-            account_number: null
+            account_number: null,
+            hcm_person_number: null
           }),
       ...(designationEntityId
         ? {
