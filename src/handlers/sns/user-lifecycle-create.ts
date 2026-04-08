@@ -16,6 +16,7 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
     const user = await okta.userApi.getUser({ userId: request.userId! }) as any
     if (typeof user.profile?.theKeyGuid === 'undefined') {
       user.profile.theKeyGuid = GUID.create()
+      await okta.userApi.updateUser({ userId: request.userId!, user })
     }
     await globalRegistry.createOrUpdateProfile(user.profile)
     await okta.userApi.updateUser({ userId: request.userId!, user })

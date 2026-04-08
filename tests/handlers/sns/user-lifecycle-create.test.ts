@@ -24,7 +24,7 @@ describe('user.lifecycle.create SNS message', () => {
     vi.clearAllMocks()
   })
 
-  it('does nothing if user already has `theKeyGuid`', async () => {
+  it('does not persist GUID if user already has `theKeyGuid`', async () => {
     const profile = { theKeyGuid: '58ae8a88-878c-47a8-a22e-543665b7fe33' }
     mockCreateOrUpdateProfile.mockResolvedValue(true)
     mockGetUser.mockResolvedValue({ profile })
@@ -32,18 +32,31 @@ describe('user.lifecycle.create SNS message', () => {
     expect(Client).toHaveBeenCalled()
     expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7' })
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
-    expect(mockUpdateUser).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalledTimes(1)
   })
 
-  it('updates user profile with new `theKeyGuid` if its missing', async () => {
+  it('generates and persists theKeyGuid before calling GR', async () => {
     vi.spyOn(GUID, 'create').mockReturnValue('58ae8a88-878c-47a8-a22e-543665b7fe33')
     mockCreateOrUpdateProfile.mockResolvedValue(true)
     const profile: Record<string, unknown> = {}
-    mockGetUser.mockResolvedValue({ profile })
+    const user = { profile }
+    mockGetUser.mockResolvedValue(user)
     await handler(created as any)
     expect(profile.theKeyGuid).toEqual('58ae8a88-878c-47a8-a22e-543665b7fe33')
-    expect(mockUpdateUser).toHaveBeenCalled()
+    expect(mockUpdateUser).toHaveBeenCalledTimes(2)
     expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
+  })
+
+  it('persists theKeyGuid even when GR call fails', async () => {
+    vi.spyOn(GUID, 'create').mockReturnValue('58ae8a88-878c-47a8-a22e-543665b7fe33')
+    mockCreateOrUpdateProfile.mockRejectedValue(new Error('GR failed'))
+    const profile: Record<string, unknown> = {}
+    const user = { profile }
+    mockGetUser.mockResolvedValue(user)
+    await expect(handler(created as any)).rejects.toThrow('GR failed')
+    expect(profile.theKeyGuid).toEqual('58ae8a88-878c-47a8-a22e-543665b7fe33')
+    expect(mockUpdateUser).toHaveBeenCalledTimes(1)
+    expect(mockUpdateUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7', user })
   })
 
   it('should return an error', async () => {
