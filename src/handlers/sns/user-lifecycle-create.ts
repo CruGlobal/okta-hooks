@@ -14,6 +14,13 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
   try {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)
     const user = await okta.userApi.getUser({ userId: request.userId! }) as any
+    if (user.status === 'DEPROVISIONED') {
+      await okta.groupApi.unassignUserFromGroup({
+        groupId: process.env.OKTA_MISSING_GROUP_ID!,
+        userId: request.userId!
+      })
+      return
+    }
     if (typeof user.profile?.theKeyGuid === 'undefined') {
       user.profile.theKeyGuid = GUID.create()
     }
