@@ -35,6 +35,15 @@ describe('user.lifecycle.create SNS message', () => {
     expect(mockUpdateUser).toHaveBeenCalledTimes(1)
   })
 
+  it('skips Okta update when GR profile is unchanged', async () => {
+    const profile = { theKeyGuid: '58ae8a88-878c-47a8-a22e-543665b7fe33' }
+    mockCreateOrUpdateProfile.mockResolvedValue(false)
+    mockGetUser.mockResolvedValue({ profile })
+    await handler(created as any)
+    expect(mockCreateOrUpdateProfile).toHaveBeenCalledWith(profile)
+    expect(mockUpdateUser).not.toHaveBeenCalled()
+  })
+
   it('generates and persists theKeyGuid before calling GR', async () => {
     vi.spyOn(GUID, 'create').mockReturnValue('58ae8a88-878c-47a8-a22e-543665b7fe33')
     mockCreateOrUpdateProfile.mockResolvedValue(true)
@@ -57,6 +66,14 @@ describe('user.lifecycle.create SNS message', () => {
     expect(profile.theKeyGuid).toEqual('58ae8a88-878c-47a8-a22e-543665b7fe33')
     expect(mockUpdateUser).toHaveBeenCalledTimes(1)
     expect(mockUpdateUser).toHaveBeenCalledWith({ userId: '00uo1red47olcenOx0h7', user })
+  })
+
+  it('throws if Okta returns a user with no profile', async () => {
+    mockGetUser.mockResolvedValue({})
+    await expect(handler(created as any)).rejects.toThrow('Okta user 00uo1red47olcenOx0h7 has no profile')
+    expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()
+    expect(mockUpdateUser).not.toHaveBeenCalled()
+    expect(rollbar.error).toHaveBeenCalled()
   })
 
   it('should return an error', async () => {
