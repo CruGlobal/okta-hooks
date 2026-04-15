@@ -1,24 +1,13 @@
 import { GRClient } from 'global-registry-nodejs-client'
 import { endsWith, startsWith, get, find } from 'lodash'
 import equalsIgnoreCase from '../utils/equals-ignore-case.js'
+import type { OktaUserProfile } from '../types/okta.js'
 
 export const PERSON_ENTITY_TYPE = 'person'
 export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designation'
 export const THE_KEY_SYSYEM = 'the_key'
 export const PSHR_SYSTEM = 'pshr'
 export const SIEBEL_SYSTEM = 'siebel'
-
-interface OktaUserProfile {
-  theKeyGuid: string
-  login: string
-  firstName: string
-  lastName: string
-  email?: string
-  usDesignationNumber?: string
-  usEmployeeId?: string
-  thekeyGrPersonId?: string | null
-  grMasterPersonId?: string | null
-}
 
 interface DesignationRelationshipEntity {
   id: string
