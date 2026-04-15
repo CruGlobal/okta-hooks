@@ -26,11 +26,16 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
       })
       return
     }
-    if (typeof user.profile?.theKeyGuid === 'undefined') {
-      user.profile!.theKeyGuid = GUID.create()
+    if (typeof user.profile === 'undefined') {
+      throw new Error(`Okta user ${request.userId} has no profile`)
     }
-    await globalRegistry.createOrUpdateProfile(user.profile as OktaUserProfile)
-    await okta.userApi.updateUser({ userId: request.userId!, user })
+    if (typeof user.profile.theKeyGuid === 'undefined') {
+      user.profile.theKeyGuid = GUID.create()
+      await okta.userApi.updateUser({ userId: request.userId!, user })
+    }
+    if (await globalRegistry.createOrUpdateProfile(user.profile as OktaUserProfile)) {
+      await okta.userApi.updateUser({ userId: request.userId!, user })
+    }
   } catch (error) {
     await rollbar.error('user.lifecycle.create Error', error as Error, { lambdaEvent })
     throw error
