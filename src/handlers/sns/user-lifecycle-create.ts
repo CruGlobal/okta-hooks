@@ -4,6 +4,7 @@ import OktaEvent from '../../models/okta-event.js'
 import rollbar from '../../config/rollbar.js'
 import GUID from '../../models/guid.js'
 import GlobalRegistry from '../../models/global-registry.js'
+import type { OktaUserProfile } from '../../types/okta.js'
 
 export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
   const okta = new Client({ cacheMiddleware: null })
@@ -13,11 +14,22 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
   )
   try {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)
-    const user = await okta.userApi.getUser({ userId: request.userId! }) as any
-    if (typeof user.profile?.theKeyGuid === 'undefined') {
-      user.profile.theKeyGuid = GUID.create()
+    const user = await okta.userApi.getUser({ userId: request.userId! })
+    if (user.status === 'DEPROVISIONED') {
+      const missingGroupId = process.env.OKTA_MISSING_GROUP_ID
+      if (!missingGroupId) {
+        throw new Error('OKTA_MISSING_GROUP_ID is not set')
+      }
+      await okta.groupApi.unassignUserFromGroup({
+        groupId: missingGroupId,
+        userId: request.userId!
+      })
+      return
     }
-    await globalRegistry.createOrUpdateProfile(user.profile)
+    if (typeof user.profile?.theKeyGuid === 'undefined') {
+      user.profile!.theKeyGuid = GUID.create()
+    }
+    await globalRegistry.createOrUpdateProfile(user.profile as OktaUserProfile)
     await okta.userApi.updateUser({ userId: request.userId!, user })
   } catch (error) {
     await rollbar.error('user.lifecycle.create Error', error as Error, { lambdaEvent })
