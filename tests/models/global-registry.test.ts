@@ -175,6 +175,7 @@ describe('GlobalRegistry', () => {
             key_guid: profile.theKeyGuid
           },
           account_number: null,
+          hcm_person_number: null,
           'designation:relationship': {
             designation: designationEntityId,
             client_integration_id: profile.theKeyGuid
@@ -200,7 +201,9 @@ describe('GlobalRegistry', () => {
             key_guid: profile.theKeyGuid
           },
           account_number: '0987654',
+          hcm_person_number: '0987654',
           linked_identities: {
+            hcm: { hcm_person_number: '0987654' },
             pshr: { account_number: '0987654' },
             siebel: { account_number: '0987654' }
           }
