@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { handler } from '@/handlers/sns/user-lifecycle-create.js'
 import rollbar from '@/config/rollbar.js'
 import { Client, mockGetUser, mockUpdateUser, mockUnassignUserFromGroup } from '../../mocks/okta-sdk-nodejs.js'
@@ -20,12 +20,13 @@ vi.mock('@okta/okta-sdk-nodejs', async () => {
 })
 
 describe('user.lifecycle.create SNS message', () => {
-  beforeAll(() => {
-    process.env.OKTA_MISSING_GROUP_ID = 'test-group-id'
-  })
-
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubEnv('OKTA_MISSING_GROUP_ID', 'test-group-id')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('does nothing if user already has `theKeyGuid`', async () => {
@@ -59,6 +60,14 @@ describe('user.lifecycle.create SNS message', () => {
     })
     expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()
     expect(mockUpdateUser).not.toHaveBeenCalled()
+  })
+
+  it('throws if OKTA_MISSING_GROUP_ID is not set when handling a deprovisioned user', async () => {
+    vi.stubEnv('OKTA_MISSING_GROUP_ID', '')
+    mockGetUser.mockResolvedValue({ status: 'DEPROVISIONED', profile: {} })
+    await expect(handler(created as any)).rejects.toThrow('OKTA_MISSING_GROUP_ID is not set')
+    expect(mockUnassignUserFromGroup).not.toHaveBeenCalled()
+    expect(rollbar.error).toHaveBeenCalled()
   })
 
   it('should return an error', async () => {
