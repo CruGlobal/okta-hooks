@@ -49,6 +49,6 @@
     "request": "^2.88.0",
     "rollbar": "^2.26.5",
     "source-map-support": "^0.5.21",
-    "uuid": "^8.3.2"
+    "uuid": "^14.0.0"
   }
 }
