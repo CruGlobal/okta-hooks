@@ -229,6 +229,34 @@ class GlobalRegistry {
     }
   }
 
+  emailAddresses(entity: Record<string, unknown>): string[] {
+    const emailAddress = get(entity, 'person.email_address')
+    const list = Array.isArray(emailAddress) ? emailAddress : [emailAddress]
+    return list
+      .map((item) => get(item, 'email'))
+      .filter((email): email is string => typeof email === 'string')
+  }
+
+  isAccountNumberConflict(entity: Record<string, unknown>, profile: OktaUserProfile): boolean {
+    const accountNumber = get(entity, 'person.account_number')
+    const hcmPersonNumber = get(entity, 'person.hcm_person_number')
+    const clientIntegrationId = get(entity, 'person.client_integration_id')
+
+    // Authoritative match: actually holds this employee number in either identifier field.
+    const numberMatches =
+      equalsIgnoreCase(accountNumber, profile.usEmployeeId) ||
+      equalsIgnoreCase(hcmPersonNumber, profile.usEmployeeId)
+    if (!numberMatches) {
+      return false
+    }
+    // Never the account currently being saved.
+    if (equalsIgnoreCase(clientIntegrationId, profile.theKeyGuid)) {
+      return false
+    }
+    // A different account: none of its emails equal the saving Cru login.
+    return !this.emailAddresses(entity).some((email) => equalsIgnoreCase(email, profile.login))
+  }
+
   isProbablyTestAccount(email: string | undefined): boolean {
     if (!email || typeof email !== 'string') {
       return true

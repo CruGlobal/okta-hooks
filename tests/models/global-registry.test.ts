@@ -317,6 +317,86 @@ describe('GlobalRegistry', () => {
     })
   })
 
+  describe('isAccountNumberConflict( entity, profile )', () => {
+    const profile = {
+      theKeyGuid: 'NEW-GUID',
+      login: 'jon.watson@cru.org',
+      usEmployeeId: '12345678'
+    } as any
+
+    it('true: account_number matches, different email, different guid', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'STALE-GUID',
+          email_address: { email: 'jon@gmail.com' }
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('true: matches on hcm_person_number only', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          hcm_person_number: '12345678',
+          client_integration_id: 'STALE-GUID',
+          email_address: { email: 'jon@gmail.com' }
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('true: email_address is an array with no matching email', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'STALE-GUID',
+          email_address: [{ email: 'jon@gmail.com' }, { email: 'jon@yahoo.com' }]
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('false: number does not actually match (loose filter guard)', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '99999999',
+          client_integration_id: 'STALE-GUID',
+          email_address: { email: 'jon@gmail.com' }
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+
+    it('false: same account being saved (client_integration_id matches theKeyGuid)', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'NEW-GUID',
+          email_address: { email: 'jon.watson@cru.org' }
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+
+    it('false: one of the emails matches the saving login', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'STALE-GUID',
+          email_address: [{ email: 'old@gmail.com' }, { email: 'jon.watson@cru.org' }]
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+  })
+
   describe('deleteProfile( profile )', () => {
     it('should remove person and designation fro GR', async () => {
       const profile = { theKeyGuid: uuid(), thekeyGrPersonId: uuid(), grMasterPersonId: uuid() } as any
