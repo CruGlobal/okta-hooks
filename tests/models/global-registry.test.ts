@@ -561,6 +561,31 @@ describe('GlobalRegistry', () => {
       expect(mockEntityPUT).toHaveBeenCalledTimes(1)
     })
 
+    it('clears each of multiple distinct conflicts', async () => {
+      const entityA = conflictEntity({
+        id: 'stale-A',
+        client_integration_id: 'GUID-A',
+        email_address: { email: 'a@gmail.com' }
+      })
+      const entityB = conflictEntity({
+        id: 'stale-B',
+        client_integration_id: 'GUID-B',
+        email_address: { email: 'b@gmail.com' }
+      })
+      mockEntityGET
+        .mockResolvedValueOnce({ entities: [entityA] }) // account_number query
+        .mockResolvedValueOnce({ entities: [entityB] }) // hcm_person_number query
+
+      await gr.resolveAccountNumberCollision(staffProfile())
+
+      expect(mockEntityPUT).toHaveBeenCalledTimes(2)
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-A', { account_number: null, hcm_person_number: null })
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-B', { account_number: null, hcm_person_number: null })
+      expect(updateUser).toHaveBeenCalledTimes(2)
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "GUID-A"' })
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "GUID-B"' })
+    })
+
     it('resolves an HCM-only conflict (account_number absent)', async () => {
       const hcmOnly = conflictEntity({ account_number: undefined })
       mockEntityGET
