@@ -198,6 +198,16 @@ class GlobalRegistry {
     await this.client.Entity.delete(relationshipEntityId)
   }
 
+  async releaseAccountNumber(entity: Record<string, unknown>): Promise<void> {
+    const personId = get(entity, 'person.id') as string
+    // PUT /entities/:id updates the loaded person with update-time validations and
+    // partial reconciliation; a null value destroys that field's value-entity.
+    await this.client.Entity.put(personId, {
+      account_number: null,
+      hcm_person_number: null
+    })
+  }
+
   isFieldNotDefinedError(error: unknown): boolean {
     const err = error as { statusCode?: number; error?: unknown; message?: string }
     if (err?.statusCode !== 400) {

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import GlobalRegistry, { PERSON_DESIGNATION_ENTITY_TYPE } from '@/models/global-registry.js'
-import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST } from 'global-registry-nodejs-client'
+import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT } from 'global-registry-nodejs-client'
 import { v4 as uuid } from 'uuid'
 
 vi.mock('global-registry-nodejs-client', async () => {
-  const { mockEntityGET, mockEntityDELETE, mockEntityPOST, GRClient } = await import('../mocks/global-registry-nodejs-client.js')
-  return { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST }
+  const { mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT, GRClient } = await import('../mocks/global-registry-nodejs-client.js')
+  return { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT }
 })
 
 describe('GlobalRegistry', () => {
@@ -394,6 +394,17 @@ describe('GlobalRegistry', () => {
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+  })
+
+  describe('releaseAccountNumber( entity )', () => {
+    it('clears account_number and hcm_person_number by person id via PUT', async () => {
+      mockEntityPUT.mockResolvedValue({})
+      await globalRegistry.releaseAccountNumber({ person: { id: 'person-123' } })
+      expect(mockEntityPUT).toHaveBeenCalledWith('person-123', {
+        account_number: null,
+        hcm_person_number: null
+      })
     })
   })
 
