@@ -229,6 +229,7 @@ describe('GlobalRegistry', () => {
       }
       vi.spyOn(globalRegistry, 'buildPersonEntity').mockResolvedValue({ client_integration_id: profile.theKeyGuid })
       vi.spyOn(globalRegistry, 'deleteDesignationRelationshipIfNecessary').mockResolvedValue(undefined)
+      vi.spyOn(globalRegistry, 'resolveAccountNumberCollision').mockResolvedValue(undefined)
     })
 
     it('should return true if profile was updated', async () => {
@@ -279,6 +280,20 @@ describe('GlobalRegistry', () => {
         }
       })
       expect(await globalRegistry.createOrUpdateProfile(profile)).toBeFalsy()
+    })
+
+    it('resolves account_number collisions before posting the entity', async () => {
+      const order: string[] = []
+      vi.spyOn(globalRegistry, 'resolveAccountNumberCollision').mockImplementation(async () => {
+        order.push('resolve')
+      })
+      mockEntityPOST.mockImplementation(async () => {
+        order.push('post')
+        return { entity: { person: { id: uuid() } } }
+      })
+      await globalRegistry.createOrUpdateProfile(profile)
+      expect(globalRegistry.resolveAccountNumberCollision).toHaveBeenCalledWith(profile)
+      expect(order).toEqual(['resolve', 'post'])
     })
   })
 

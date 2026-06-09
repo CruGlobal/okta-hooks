@@ -30,6 +30,8 @@ class GlobalRegistry {
   }
 
   async createOrUpdateProfile(profile: OktaUserProfile): Promise<boolean> {
+    await this.resolveAccountNumberCollision(profile)
+
     const personEntity = await this.buildPersonEntity(profile)
 
     await this.deleteDesignationRelationshipIfNecessary(profile)
