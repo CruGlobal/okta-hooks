@@ -20,6 +20,12 @@ describe('GlobalRegistry', () => {
       expect(globalRegistry.client).toBeDefined()
       expect(GRClient).toHaveBeenCalledWith({ accessToken: 'token', baseUrl: 'https://example.com' })
     })
+
+    it('accepts an optional Okta client', () => {
+      const okta = { userApi: {} } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+      expect(gr).toBeInstanceOf(GlobalRegistry)
+    })
   })
 
   describe('isProbablyTestAccount( email )', () => {

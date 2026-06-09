@@ -2,6 +2,7 @@ import { GRClient } from 'global-registry-nodejs-client'
 import { endsWith, startsWith, get, find } from 'lodash'
 import equalsIgnoreCase from '../utils/equals-ignore-case.js'
 import type { OktaUserProfile } from '../types/okta.js'
+import type { Client } from '@okta/okta-sdk-nodejs'
 
 export const PERSON_ENTITY_TYPE = 'person'
 export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designation'
@@ -19,9 +20,11 @@ interface DesignationRelationshipEntity {
 
 class GlobalRegistry {
   private client: GRClient
+  private okta?: Client
 
-  constructor(accessToken: string, baseUrl: string) {
+  constructor(accessToken: string, baseUrl: string, okta?: Client) {
     this.client = new GRClient({ baseUrl, accessToken })
+    this.okta = okta
   }
 
   async createOrUpdateProfile(profile: OktaUserProfile): Promise<boolean> {
