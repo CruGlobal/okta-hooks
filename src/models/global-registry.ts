@@ -1,6 +1,7 @@
 import { GRClient } from 'global-registry-nodejs-client'
 import { endsWith, startsWith, get, find } from 'lodash'
 import equalsIgnoreCase from '../utils/equals-ignore-case.js'
+import { hasCruDomain } from '../config/domains.js'
 import type { OktaUserProfile } from '../types/okta.js'
 import type { Client, User } from '@okta/okta-sdk-nodejs'
 import rollbar from '../config/rollbar.js'
@@ -315,6 +316,42 @@ class GlobalRegistry {
       endsWith(email, '@test.com') ||
       endsWith(email, '@test.cru.org')
     )
+  }
+
+  async resolveAccountNumberCollision(profile: OktaUserProfile): Promise<void> {
+    const employeeId = profile.usEmployeeId
+    if (
+      !employeeId ||
+      this.isProbablyTestAccount(profile.login) ||
+      !hasCruDomain(profile.login) ||
+      profile.orca === false
+    ) {
+      return
+    }
+
+    const fields = 'account_number,hcm_person_number,email_address'
+    const [byAccountNumber, byHcmPersonNumber] = await Promise.all([
+      this.findConflictCandidates({ account_number: employeeId }, fields),
+      this.findConflictCandidates({ hcm_person_number: employeeId }, fields)
+    ])
+
+    const candidatesById = new Map<string, Record<string, unknown>>()
+    for (const entity of [...byAccountNumber, ...byHcmPersonNumber]) {
+      const personId = get(entity, 'person.id') as string | undefined
+      if (personId) {
+        candidatesById.set(personId, entity)
+      }
+    }
+
+    for (const entity of candidatesById.values()) {
+      if (this.isAccountNumberConflict(entity, profile)) {
+        // GR clear is required (runs before the new entity is posted); a failure
+        // propagates because the subsequent post would collide anyway.
+        await this.releaseAccountNumber(entity)
+        // Okta clear is best-effort (logged, never blocks onboarding).
+        await this.clearStaleOktaEmployeeId(entity)
+      }
+    }
   }
 }
 
