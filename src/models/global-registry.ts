@@ -198,6 +198,37 @@ class GlobalRegistry {
     await this.client.Entity.delete(relationshipEntityId)
   }
 
+  isFieldNotDefinedError(error: unknown): boolean {
+    const err = error as { statusCode?: number; error?: unknown; message?: string }
+    if (err?.statusCode !== 400) {
+      return false
+    }
+    const haystack = `${JSON.stringify(err.error ?? '')} ${err.message ?? ''}`
+    return haystack.includes("can't find entity type named")
+  }
+
+  async findConflictCandidates(
+    identifierFilter: Record<string, string>,
+    fields: string
+  ): Promise<Array<Record<string, unknown>>> {
+    try {
+      const result = await this.client.Entity.get({
+        entity_type: PERSON_ENTITY_TYPE,
+        filters: { owned_by: THE_KEY_SYSYEM, ...identifierFilter },
+        fields
+      })
+      return result.entities ?? []
+    } catch (error) {
+      // During the PSHR->HCM transition a filter field may not be defined on the person
+      // type in a given environment; GR returns a 400 in that case. Treat that single
+      // field's query as "no candidates" and let the other query proceed.
+      if (this.isFieldNotDefinedError(error)) {
+        return []
+      }
+      throw error
+    }
+  }
+
   isProbablyTestAccount(email: string | undefined): boolean {
     if (!email || typeof email !== 'string') {
       return true

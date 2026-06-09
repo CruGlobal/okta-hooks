@@ -279,6 +279,44 @@ describe('GlobalRegistry', () => {
     })
   })
 
+  describe('findConflictCandidates( filter, fields )', () => {
+    it('returns entities for a matching filter', async () => {
+      const entities = [{ person: { id: 'p1' } }]
+      mockEntityGET.mockResolvedValue({ entities })
+      const result = await globalRegistry.findConflictCandidates(
+        { account_number: '12345678' },
+        'account_number,hcm_person_number,email_address'
+      )
+      expect(result).toEqual(entities)
+      expect(mockEntityGET).toHaveBeenCalledWith({
+        entity_type: 'person',
+        filters: { owned_by: 'the_key', account_number: '12345678' },
+        fields: 'account_number,hcm_person_number,email_address'
+      })
+    })
+
+    it('returns [] when GR has no entities key', async () => {
+      mockEntityGET.mockResolvedValue({})
+      expect(await globalRegistry.findConflictCandidates({ hcm_person_number: 'x' }, 'f')).toEqual([])
+    })
+
+    it('treats a "field not defined" 400 as empty', async () => {
+      mockEntityGET.mockRejectedValue({
+        statusCode: 400,
+        error: { error: "can't find entity type named 'hcm_person_number' that is a child of \"person\"" }
+      })
+      expect(await globalRegistry.findConflictCandidates({ hcm_person_number: 'x' }, 'f')).toEqual([])
+    })
+
+    it('re-throws any other error', async () => {
+      mockEntityGET.mockRejectedValue({ statusCode: 500, error: 'boom' })
+      await expect(globalRegistry.findConflictCandidates({ account_number: 'x' }, 'f')).rejects.toEqual({
+        statusCode: 500,
+        error: 'boom'
+      })
+    })
+  })
+
   describe('deleteProfile( profile )', () => {
     it('should remove person and designation fro GR', async () => {
       const profile = { theKeyGuid: uuid(), thekeyGrPersonId: uuid(), grMasterPersonId: uuid() } as any
