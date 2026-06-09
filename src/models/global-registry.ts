@@ -2,7 +2,8 @@ import { GRClient } from 'global-registry-nodejs-client'
 import { endsWith, startsWith, get, find } from 'lodash'
 import equalsIgnoreCase from '../utils/equals-ignore-case.js'
 import type { OktaUserProfile } from '../types/okta.js'
-import type { Client } from '@okta/okta-sdk-nodejs'
+import type { Client, User } from '@okta/okta-sdk-nodejs'
+import rollbar from '../config/rollbar.js'
 
 export const PERSON_ENTITY_TYPE = 'person'
 export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designation'
@@ -206,6 +207,41 @@ class GlobalRegistry {
       account_number: null,
       hcm_person_number: null
     })
+  }
+
+  async clearStaleOktaEmployeeId(entity: Record<string, unknown>): Promise<void> {
+    const okta = this.okta
+    if (!okta) {
+      return
+    }
+    const theKeyGuid = get(entity, 'person.client_integration_id') as string | undefined
+    if (!theKeyGuid) {
+      return
+    }
+    try {
+      const collection = await okta.userApi.listUsers({
+        search: `profile.theKeyGuid eq "${theKeyGuid}"`
+      })
+      const matched: User[] = []
+      await collection.each((user: User) => {
+        matched.push(user)
+      })
+      for (const user of matched) {
+        if (user.profile) {
+          const staleProfile = user.profile as Record<string, unknown>
+          staleProfile.usEmployeeId = null
+        }
+        await okta.userApi.updateUser({ userId: user.id!, user })
+      }
+    } catch (error) {
+      // Best-effort: the GR collision is already resolved; only the ping-pong mitigation
+      // is deferred. Surface but do not block onboarding.
+      await rollbar.error(
+        'resolveAccountNumberCollision: failed to clear stale Okta usEmployeeId',
+        error as Error,
+        { theKeyGuid }
+      )
+    }
   }
 
   isFieldNotDefinedError(error: unknown): boolean {

@@ -2,11 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import GlobalRegistry, { PERSON_DESIGNATION_ENTITY_TYPE } from '@/models/global-registry.js'
 import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT } from 'global-registry-nodejs-client'
 import { v4 as uuid } from 'uuid'
+import rollbar from '@/config/rollbar.js'
 
 vi.mock('global-registry-nodejs-client', async () => {
   const { mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT, GRClient } = await import('../mocks/global-registry-nodejs-client.js')
   return { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT }
 })
+
+vi.mock('@/config/rollbar.js')
 
 describe('GlobalRegistry', () => {
   let globalRegistry: GlobalRegistry
@@ -405,6 +408,48 @@ describe('GlobalRegistry', () => {
         account_number: null,
         hcm_person_number: null
       })
+    })
+  })
+
+  describe('clearStaleOktaEmployeeId( entity )', () => {
+    const entity = { person: { client_integration_id: 'STALE-GUID' } }
+
+    it('does nothing when no Okta client is configured', async () => {
+      const gr = new GlobalRegistry('token', 'https://example.com')
+      await gr.clearStaleOktaEmployeeId(entity)
+      // No throw, nothing to assert beyond completion.
+    })
+
+    it('nulls usEmployeeId on the matched user and updates Okta', async () => {
+      const staleUser = { id: 'okta-stale-id', profile: { theKeyGuid: 'STALE-GUID', usEmployeeId: '12345678' } }
+      const updateUser = vi.fn().mockResolvedValue(undefined)
+      const listUsers = vi.fn().mockResolvedValue({
+        each: (fn: (u: any) => void) => [staleUser].forEach(fn)
+      })
+      const okta = { userApi: { listUsers, updateUser } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+
+      await gr.clearStaleOktaEmployeeId(entity)
+
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "STALE-GUID"' })
+      expect(staleUser.profile.usEmployeeId).toBeNull()
+      expect(updateUser).toHaveBeenCalledWith({ userId: 'okta-stale-id', user: staleUser })
+    })
+
+    it('logs to Rollbar and does not throw when Okta fails', async () => {
+      const listUsers = vi.fn().mockRejectedValue(new Error('okta down'))
+      const okta = { userApi: { listUsers, updateUser: vi.fn() } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+
+      await expect(gr.clearStaleOktaEmployeeId(entity)).resolves.toBeUndefined()
+      expect(rollbar.error).toHaveBeenCalled()
+    })
+
+    it('does nothing when the entity has no client_integration_id', async () => {
+      const okta = { userApi: { listUsers: vi.fn(), updateUser: vi.fn() } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+      await gr.clearStaleOktaEmployeeId({ person: {} })
+      expect(okta.userApi.listUsers).not.toHaveBeenCalled()
     })
   })
 
