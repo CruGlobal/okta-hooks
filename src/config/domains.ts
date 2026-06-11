@@ -2,7 +2,8 @@
  * Cru email-domain classification.
  *
  * Ported from us-onboarding (src/config/domains.ts) and kept self-contained here to
- * avoid a cross-repo dependency. If the canonical list changes there, update it here too.
+ * avoid a cross-repo dependency. The same list is duplicated in us-onboarding and celigo;
+ * if the canonical list changes in any of them, keep the others in sync.
  */
 
 export const googleManagedDomains: string[] = [

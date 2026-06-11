@@ -303,13 +303,13 @@ describe('GlobalRegistry', () => {
       mockEntityGET.mockResolvedValue({ entities })
       const result = await globalRegistry.findConflictCandidates(
         { account_number: '12345678' },
-        'account_number,hcm_person_number,email_address'
+        'account_number,hcm_person_number'
       )
       expect(result).toEqual(entities)
       expect(mockEntityGET).toHaveBeenCalledWith({
         entity_type: 'person',
         filters: { owned_by: 'the_key', account_number: '12345678' },
-        fields: 'account_number,hcm_person_number,email_address'
+        fields: 'account_number,hcm_person_number'
       })
     })
 
@@ -342,13 +342,12 @@ describe('GlobalRegistry', () => {
       usEmployeeId: '12345678'
     } as any
 
-    it('true: account_number matches, different email, different guid', () => {
+    it('true: account_number matches, different guid', () => {
       const entity = {
         person: {
           id: 'p1',
           account_number: '12345678',
-          client_integration_id: 'STALE-GUID',
-          email_address: { email: 'jon@gmail.com' }
+          client_integration_id: 'STALE-GUID'
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
@@ -359,32 +358,30 @@ describe('GlobalRegistry', () => {
         person: {
           id: 'p1',
           hcm_person_number: '12345678',
-          client_integration_id: 'STALE-GUID',
-          email_address: { email: 'jon@gmail.com' }
+          client_integration_id: 'STALE-GUID'
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
     })
 
-    it('true: email_address is an array with no matching email', () => {
+    it('true: email is irrelevant — a conflict even if an email matches the saving login', () => {
       const entity = {
         person: {
           id: 'p1',
           account_number: '12345678',
           client_integration_id: 'STALE-GUID',
-          email_address: [{ email: 'jon@gmail.com' }, { email: 'jon@yahoo.com' }]
+          email_address: [{ email: 'old@gmail.com' }, { email: 'jon.watson@cru.org' }]
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
     })
 
-    it('false: number does not actually match (loose filter guard)', () => {
+    it('false: neither identifier field matches the employee number', () => {
       const entity = {
         person: {
           id: 'p1',
           account_number: '99999999',
-          client_integration_id: 'STALE-GUID',
-          email_address: { email: 'jon@gmail.com' }
+          client_integration_id: 'STALE-GUID'
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
@@ -395,20 +392,7 @@ describe('GlobalRegistry', () => {
         person: {
           id: 'p1',
           account_number: '12345678',
-          client_integration_id: 'NEW-GUID',
-          email_address: { email: 'jon.watson@cru.org' }
-        }
-      }
-      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
-    })
-
-    it('false: one of the emails matches the saving login', () => {
-      const entity = {
-        person: {
-          id: 'p1',
-          account_number: '12345678',
-          client_integration_id: 'STALE-GUID',
-          email_address: [{ email: 'old@gmail.com' }, { email: 'jon.watson@cru.org' }]
+          client_integration_id: 'NEW-GUID'
         }
       }
       expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
@@ -528,12 +512,12 @@ describe('GlobalRegistry', () => {
       expect(mockEntityGET).toHaveBeenCalledWith({
         entity_type: 'person',
         filters: { owned_by: 'the_key', account_number: '12345678' },
-        fields: 'account_number,hcm_person_number,email_address'
+        fields: 'account_number,hcm_person_number'
       })
       expect(mockEntityGET).toHaveBeenCalledWith({
         entity_type: 'person',
         filters: { owned_by: 'the_key', hcm_person_number: '12345678' },
-        fields: 'account_number,hcm_person_number,email_address'
+        fields: 'account_number,hcm_person_number'
       })
     })
 
