@@ -79,7 +79,7 @@ If any condition is false, skip resolution and proceed exactly as today.
    both must be searched:
 
    ```ts
-   const fields = 'account_number,hcm_person_number,email_address'
+   const fields = 'account_number,hcm_person_number'
    const byAccountNumber = Entity.get({
      entity_type: 'person',
      filters: { owned_by: 'the_key', account_number: profile.usEmployeeId },
@@ -107,18 +107,17 @@ If any condition is false, skip resolution and proceed exactly as today.
    filterable, and unknown filters 400 (GR does not silently ignore them).
 
 2. **Select true conflicts.** Read fields off `entity.person` (verified shape — see
-   Assumptions #3). For each unique candidate, treat it as a conflict **only if all**
-   hold:
+   Assumptions #3). The uniqueness constraint is on the identifier fields only, so the
+   conflict test is purely identifier-based — email is **not** part of it. Treat a
+   candidate as a conflict **only if both** hold:
    - **Either** `person.account_number` **or** `person.hcm_person_number` is populated and
      `equalsIgnoreCase(String(field), String(profile.usEmployeeId))` (authoritative
      equality check — does not trust the filters alone, and guards against no-op writes),
      **and**
-   - **none** of the candidate's email addresses `equalsIgnoreCase` `profile.login`
-     (normalize `person.email_address` to an array first, since it may be a single object
-     or an array; a non-matching email means it belongs to a different account — the stale
-     personal account), **and**
-   - `person.client_integration_id` !== `profile.theKeyGuid` (defensive: never the account
-     being saved).
+   - `person.client_integration_id` !== `profile.theKeyGuid` — i.e. **any** `the_key`
+     entity other than the one being saved that holds this number is a collision. GR
+     forbids two `the_key` entities sharing the number, so the saving account is the only
+     legitimate holder; everything else must be cleared regardless of email.
 
 3. **For each true conflict:**
    1. **Strip GR `account_number` and `hcm_person_number`** —
@@ -206,14 +205,13 @@ three handlers that call `createOrUpdateProfile`.
    } }
    ```
 
-   Extraction paths: `entity.person.id`, `entity.person.account_number`,
-   `entity.person.hcm_person_number`, `entity.person.client_integration_id`,
-   `entity.person.email_address.email`. `email_address` returned as a single object here
-   (one email); since a person may have several and GR returns arrays for multi-valued
-   fields (cf. `master_person:relationship`, already handled both ways in this codebase),
-   extraction must normalize object-or-array. Observed hit rate in a 1000-record sample:
-   14 with `account_number`, 7 with `hcm_person_number` — confirms both lookups are
-   needed during the transition.
+   Extraction paths used: `entity.person.id`, `entity.person.account_number`,
+   `entity.person.hcm_person_number`, `entity.person.client_integration_id` (the last two
+   come back even though only the identifier fields are requested in `fields`). Email is
+   **not** consulted (the conflict test is identifier-only), so `email_address` is no
+   longer requested or read — the shape above is retained for reference only. Observed hit
+   rate in a 1000-record sample: 14 with `account_number`, 7 with `hcm_person_number` —
+   confirms both lookups are needed during the transition.
 4. ✅ **Confirmed working-as-designed.** GR's uniqueness rejection on the new post is
    driven only by collisions among `the_key`-owned entities (the `account_number` /
    `hcm_person_number` scalar fields). `linked_identities.{hcm,pshr,siebel}` live in
@@ -233,9 +231,12 @@ proceeding.
   no Okta update, normal post proceeds.
 - **Gate misses:** each of (no `usEmployeeId`, test account, non-Cru email,
   `orca === false`) → resolution skipped entirely.
-- **Single conflict:** stale entity with same `account_number`, different email →
-  `Entity.put(id, { account_number: null, hcm_person_number: null })` called, stale Okta
-  user's `usEmployeeId` cleared via `updateUser`, then post proceeds.
+- **Single conflict:** another `the_key` entity with the same `account_number` (different
+  `client_integration_id`) → `Entity.put(id, { account_number: null, hcm_person_number:
+  null })` called, stale Okta user's `usEmployeeId` cleared via `updateUser`, then post
+  proceeds.
+- **Email is irrelevant:** a conflict is cleared even if one of its emails equals the
+  saving login — only the identifier fields and `client_integration_id` matter.
 - **Legacy stale entity (no `hcm_person_number`):** found via the `account_number` query;
   PUT still clears both fields (`hcm_person_number: null` is a harmless no-op).
 - **HCM-only stale entity (no `account_number`):** found via the `hcm_person_number`
