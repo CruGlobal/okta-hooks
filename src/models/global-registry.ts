@@ -1,7 +1,10 @@
 import { GRClient } from 'global-registry-nodejs-client'
 import { endsWith, startsWith, get, find } from 'lodash'
 import equalsIgnoreCase from '../utils/equals-ignore-case.js'
+import { hasCruDomain } from '../config/domains.js'
 import type { OktaUserProfile } from '../types/okta.js'
+import type { Client, User } from '@okta/okta-sdk-nodejs'
+import rollbar from '../config/rollbar.js'
 
 export const PERSON_ENTITY_TYPE = 'person'
 export const PERSON_DESIGNATION_ENTITY_TYPE = 'person_person_designation_designation'
@@ -19,12 +22,16 @@ interface DesignationRelationshipEntity {
 
 class GlobalRegistry {
   private client: GRClient
+  private okta?: Client
 
-  constructor(accessToken: string, baseUrl: string) {
+  constructor(accessToken: string, baseUrl: string, okta?: Client) {
     this.client = new GRClient({ baseUrl, accessToken })
+    this.okta = okta
   }
 
   async createOrUpdateProfile(profile: OktaUserProfile): Promise<boolean> {
+    await this.resolveAccountNumberCollision(profile)
+
     const personEntity = await this.buildPersonEntity(profile)
 
     await this.deleteDesignationRelationshipIfNecessary(profile)
@@ -195,6 +202,100 @@ class GlobalRegistry {
     await this.client.Entity.delete(relationshipEntityId)
   }
 
+  async releaseAccountNumber(entity: Record<string, unknown>): Promise<void> {
+    const personId = get(entity, 'person.id') as string
+    // PUT /entities/:id updates the loaded person with update-time validations and
+    // partial reconciliation; a null value destroys that field's value-entity.
+    await this.client.Entity.put(personId, {
+      account_number: null,
+      hcm_person_number: null
+    })
+  }
+
+  async clearStaleOktaEmployeeId(entity: Record<string, unknown>): Promise<void> {
+    const okta = this.okta
+    if (!okta) {
+      return
+    }
+    const theKeyGuid = get(entity, 'person.client_integration_id') as string | undefined
+    if (!theKeyGuid) {
+      return
+    }
+    try {
+      const collection = await okta.userApi.listUsers({
+        search: `profile.theKeyGuid eq "${theKeyGuid}"`
+      })
+      const matched: User[] = []
+      await collection.each((user: User) => {
+        matched.push(user)
+      })
+      for (const user of matched) {
+        if (user.profile) {
+          const staleProfile = user.profile as Record<string, unknown>
+          staleProfile.usEmployeeId = null
+        }
+        await okta.userApi.updateUser({ userId: user.id!, user })
+      }
+    } catch (error) {
+      // Best-effort: the GR collision is already resolved; only the ping-pong mitigation
+      // is deferred. Surface but do not block onboarding.
+      await rollbar.error(
+        'resolveAccountNumberCollision: failed to clear stale Okta usEmployeeId',
+        error as Error,
+        { theKeyGuid }
+      )
+    }
+  }
+
+  isFieldNotDefinedError(error: unknown): boolean {
+    const err = error as { statusCode?: number; error?: unknown; message?: string }
+    if (err?.statusCode !== 400) {
+      return false
+    }
+    const haystack = `${JSON.stringify(err.error ?? '')} ${err.message ?? ''}`
+    return haystack.includes("can't find entity type named")
+  }
+
+  async findConflictCandidates(
+    identifierFilter: Record<string, string>,
+    fields: string
+  ): Promise<Array<Record<string, unknown>>> {
+    try {
+      const result = await this.client.Entity.get({
+        entity_type: PERSON_ENTITY_TYPE,
+        filters: { owned_by: THE_KEY_SYSYEM, ...identifierFilter },
+        fields
+      })
+      return result.entities ?? []
+    } catch (error) {
+      // During the PSHR->HCM transition a filter field may not be defined on the person
+      // type in a given environment; GR returns a 400 in that case. Treat that single
+      // field's query as "no candidates" and let the other query proceed.
+      if (this.isFieldNotDefinedError(error)) {
+        return []
+      }
+      throw error
+    }
+  }
+
+  isAccountNumberConflict(entity: Record<string, unknown>, profile: OktaUserProfile): boolean {
+    const accountNumber = get(entity, 'person.account_number')
+    const hcmPersonNumber = get(entity, 'person.hcm_person_number')
+    const clientIntegrationId = get(entity, 'person.client_integration_id')
+
+    // Authoritative match: actually holds this employee number in either identifier field.
+    const numberMatches =
+      equalsIgnoreCase(accountNumber, profile.usEmployeeId) ||
+      equalsIgnoreCase(hcmPersonNumber, profile.usEmployeeId)
+    if (!numberMatches) {
+      return false
+    }
+    // Any the_key entity other than the one being saved that holds this number is a
+    // collision (GR enforces uniqueness on account_number / hcm_person_number for the_key).
+    // Email is not part of the conflict — only the identifier fields are constrained.
+    return !equalsIgnoreCase(clientIntegrationId, profile.theKeyGuid)
+  }
+
   isProbablyTestAccount(email: string | undefined): boolean {
     if (!email || typeof email !== 'string') {
       return true
@@ -207,6 +308,42 @@ class GlobalRegistry {
       endsWith(email, '@test.com') ||
       endsWith(email, '@test.cru.org')
     )
+  }
+
+  async resolveAccountNumberCollision(profile: OktaUserProfile): Promise<void> {
+    const employeeId = profile.usEmployeeId
+    if (
+      !employeeId ||
+      this.isProbablyTestAccount(profile.login) ||
+      !hasCruDomain(profile.login) ||
+      profile.orca === false
+    ) {
+      return
+    }
+
+    const fields = 'account_number,hcm_person_number'
+    const [byAccountNumber, byHcmPersonNumber] = await Promise.all([
+      this.findConflictCandidates({ account_number: employeeId }, fields),
+      this.findConflictCandidates({ hcm_person_number: employeeId }, fields)
+    ])
+
+    const candidatesById = new Map<string, Record<string, unknown>>()
+    for (const entity of [...byAccountNumber, ...byHcmPersonNumber]) {
+      const personId = get(entity, 'person.id') as string | undefined
+      if (personId) {
+        candidatesById.set(personId, entity)
+      }
+    }
+
+    for (const entity of candidatesById.values()) {
+      if (this.isAccountNumberConflict(entity, profile)) {
+        // GR clear is required (runs before the new entity is posted); a failure
+        // propagates because the subsequent post would collide anyway.
+        await this.releaseAccountNumber(entity)
+        // Okta clear is best-effort (logged, never blocks onboarding).
+        await this.clearStaleOktaEmployeeId(entity)
+      }
+    }
   }
 }
 
