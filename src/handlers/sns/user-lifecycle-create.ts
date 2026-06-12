@@ -10,7 +10,8 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
   const okta = new Client({ cacheMiddleware: null })
   const globalRegistry = new GlobalRegistry(
     process.env.GLOBAL_REGISTRY_TOKEN!,
-    process.env.GLOBAL_REGISTRY_URL!
+    process.env.GLOBAL_REGISTRY_URL!,
+    okta
   )
   try {
     const request = new OktaEvent(lambdaEvent.Records[0].Sns.Message)

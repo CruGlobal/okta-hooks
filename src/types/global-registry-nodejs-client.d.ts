@@ -7,6 +7,7 @@ declare module 'global-registry-nodejs-client' {
   interface EntityGetOptions {
     entity_type: string
     filters: Record<string, string | undefined>
+    fields?: string
   }
 
   interface EntityPostOptions {
@@ -23,6 +24,11 @@ declare module 'global-registry-nodejs-client' {
   interface EntityClient {
     get(options: EntityGetOptions): Promise<EntityResponse>
     post(entity: Record<string, unknown>, options?: EntityPostOptions): Promise<EntityResponse>
+    put(
+      id: string,
+      content: Record<string, unknown>,
+      options?: EntityPostOptions
+    ): Promise<EntityResponse>
     delete(entityId: string): Promise<void>
   }
 
