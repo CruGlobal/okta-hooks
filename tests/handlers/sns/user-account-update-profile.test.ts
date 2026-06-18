@@ -31,7 +31,10 @@ describe('user.account.update_profile SNS message', () => {
 
   it('should update user if login/email has changed', async () => {
     await handler(updateProfileEvent as any)
-    expect(GlobalRegistry).toHaveBeenCalledWith('secret', 'https://example.com')
+    expect(GlobalRegistry).toHaveBeenCalledWith('secret', 'https://example.com', expect.objectContaining({
+      userApi: expect.any(Object),
+      groupApi: expect.any(Object)
+    }))
     expect(mockGetUser).toHaveBeenCalledWith({ userId: '00uo48gsq4ujEWoXJ0h7' })
     expect(profile.email).toEqual(profile.login)
     expect(mockCreateOrUpdateProfile).not.toHaveBeenCalled()

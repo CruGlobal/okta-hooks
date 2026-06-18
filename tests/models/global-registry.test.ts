@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import GlobalRegistry, { PERSON_DESIGNATION_ENTITY_TYPE } from '@/models/global-registry.js'
-import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST } from 'global-registry-nodejs-client'
+import { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT } from 'global-registry-nodejs-client'
 import { v4 as uuid } from 'uuid'
+import rollbar from '@/config/rollbar.js'
 
 vi.mock('global-registry-nodejs-client', async () => {
-  const { mockEntityGET, mockEntityDELETE, mockEntityPOST, GRClient } = await import('../mocks/global-registry-nodejs-client.js')
-  return { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST }
+  const { mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT, GRClient } = await import('../mocks/global-registry-nodejs-client.js')
+  return { GRClient, mockEntityGET, mockEntityDELETE, mockEntityPOST, mockEntityPUT }
 })
+
+vi.mock('@/config/rollbar.js')
 
 describe('GlobalRegistry', () => {
   let globalRegistry: GlobalRegistry
@@ -19,6 +22,12 @@ describe('GlobalRegistry', () => {
     it('should instantiate a new instance', () => {
       expect(globalRegistry.client).toBeDefined()
       expect(GRClient).toHaveBeenCalledWith({ accessToken: 'token', baseUrl: 'https://example.com' })
+    })
+
+    it('accepts an optional Okta client', () => {
+      const okta = { userApi: {} } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+      expect(gr).toBeInstanceOf(GlobalRegistry)
     })
   })
 
@@ -220,6 +229,7 @@ describe('GlobalRegistry', () => {
       }
       vi.spyOn(globalRegistry, 'buildPersonEntity').mockResolvedValue({ client_integration_id: profile.theKeyGuid })
       vi.spyOn(globalRegistry, 'deleteDesignationRelationshipIfNecessary').mockResolvedValue(undefined)
+      vi.spyOn(globalRegistry, 'resolveAccountNumberCollision').mockResolvedValue(undefined)
     })
 
     it('should return true if profile was updated', async () => {
@@ -270,6 +280,328 @@ describe('GlobalRegistry', () => {
         }
       })
       expect(await globalRegistry.createOrUpdateProfile(profile)).toBeFalsy()
+    })
+
+    it('resolves account_number collisions before posting the entity', async () => {
+      const order: string[] = []
+      vi.spyOn(globalRegistry, 'resolveAccountNumberCollision').mockImplementation(async () => {
+        order.push('resolve')
+      })
+      mockEntityPOST.mockImplementation(async () => {
+        order.push('post')
+        return { entity: { person: { id: uuid() } } }
+      })
+      await globalRegistry.createOrUpdateProfile(profile)
+      expect(globalRegistry.resolveAccountNumberCollision).toHaveBeenCalledWith(profile)
+      expect(order).toEqual(['resolve', 'post'])
+    })
+  })
+
+  describe('findConflictCandidates( filter, fields )', () => {
+    it('returns entities for a matching filter', async () => {
+      const entities = [{ person: { id: 'p1' } }]
+      mockEntityGET.mockResolvedValue({ entities })
+      const result = await globalRegistry.findConflictCandidates(
+        { account_number: '12345678' },
+        'account_number,hcm_person_number'
+      )
+      expect(result).toEqual(entities)
+      expect(mockEntityGET).toHaveBeenCalledWith({
+        entity_type: 'person',
+        filters: { owned_by: 'the_key', account_number: '12345678' },
+        fields: 'account_number,hcm_person_number'
+      })
+    })
+
+    it('returns [] when GR has no entities key', async () => {
+      mockEntityGET.mockResolvedValue({})
+      expect(await globalRegistry.findConflictCandidates({ hcm_person_number: 'x' }, 'f')).toEqual([])
+    })
+
+    it('treats a "field not defined" 400 as empty', async () => {
+      mockEntityGET.mockRejectedValue({
+        statusCode: 400,
+        error: { error: "can't find entity type named 'hcm_person_number' that is a child of \"person\"" }
+      })
+      expect(await globalRegistry.findConflictCandidates({ hcm_person_number: 'x' }, 'f')).toEqual([])
+    })
+
+    it('re-throws any other error', async () => {
+      mockEntityGET.mockRejectedValue({ statusCode: 500, error: 'boom' })
+      await expect(globalRegistry.findConflictCandidates({ account_number: 'x' }, 'f')).rejects.toEqual({
+        statusCode: 500,
+        error: 'boom'
+      })
+    })
+  })
+
+  describe('isAccountNumberConflict( entity, profile )', () => {
+    const profile = {
+      theKeyGuid: 'NEW-GUID',
+      login: 'jon.watson@cru.org',
+      usEmployeeId: '12345678'
+    } as any
+
+    it('true: account_number matches, different guid', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'STALE-GUID'
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('true: matches on hcm_person_number only', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          hcm_person_number: '12345678',
+          client_integration_id: 'STALE-GUID'
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('true: email is irrelevant — a conflict even if an email matches the saving login', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'STALE-GUID',
+          email_address: [{ email: 'old@gmail.com' }, { email: 'jon.watson@cru.org' }]
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(true)
+    })
+
+    it('false: neither identifier field matches the employee number', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '99999999',
+          client_integration_id: 'STALE-GUID'
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+
+    it('false: same account being saved (client_integration_id matches theKeyGuid)', () => {
+      const entity = {
+        person: {
+          id: 'p1',
+          account_number: '12345678',
+          client_integration_id: 'NEW-GUID'
+        }
+      }
+      expect(globalRegistry.isAccountNumberConflict(entity, profile)).toBe(false)
+    })
+  })
+
+  describe('releaseAccountNumber( entity )', () => {
+    it('clears account_number and hcm_person_number by person id via PUT', async () => {
+      mockEntityPUT.mockResolvedValue({})
+      await globalRegistry.releaseAccountNumber({ person: { id: 'person-123' } })
+      expect(mockEntityPUT).toHaveBeenCalledWith('person-123', {
+        account_number: null,
+        hcm_person_number: null
+      })
+    })
+  })
+
+  describe('clearStaleOktaEmployeeId( entity )', () => {
+    const entity = { person: { client_integration_id: 'STALE-GUID' } }
+
+    it('does nothing when no Okta client is configured', async () => {
+      const gr = new GlobalRegistry('token', 'https://example.com')
+      await gr.clearStaleOktaEmployeeId(entity)
+      // No throw, nothing to assert beyond completion.
+    })
+
+    it('nulls usEmployeeId on the matched user and updates Okta', async () => {
+      const staleUser = { id: 'okta-stale-id', profile: { theKeyGuid: 'STALE-GUID', usEmployeeId: '12345678' } }
+      const updateUser = vi.fn().mockResolvedValue(undefined)
+      const listUsers = vi.fn().mockResolvedValue({
+        each: (fn: (u: any) => void) => [staleUser].forEach(fn)
+      })
+      const okta = { userApi: { listUsers, updateUser } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+
+      await gr.clearStaleOktaEmployeeId(entity)
+
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "STALE-GUID"' })
+      expect(staleUser.profile.usEmployeeId).toBeNull()
+      expect(updateUser).toHaveBeenCalledWith({ userId: 'okta-stale-id', user: staleUser })
+    })
+
+    it('logs to Rollbar and does not throw when Okta fails', async () => {
+      const listUsers = vi.fn().mockRejectedValue(new Error('okta down'))
+      const okta = { userApi: { listUsers, updateUser: vi.fn() } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+
+      await expect(gr.clearStaleOktaEmployeeId(entity)).resolves.toBeUndefined()
+      expect(rollbar.error).toHaveBeenCalled()
+    })
+
+    it('does nothing when the entity has no client_integration_id', async () => {
+      const okta = { userApi: { listUsers: vi.fn(), updateUser: vi.fn() } } as any
+      const gr = new GlobalRegistry('token', 'https://example.com', okta)
+      await gr.clearStaleOktaEmployeeId({ person: {} })
+      expect(okta.userApi.listUsers).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('resolveAccountNumberCollision( profile )', () => {
+    let okta: any
+    let updateUser: ReturnType<typeof vi.fn>
+    let listUsers: ReturnType<typeof vi.fn>
+    let gr: GlobalRegistry
+
+    const conflictEntity = (overrides: Record<string, unknown> = {}) => ({
+      person: {
+        id: 'stale-person-id',
+        account_number: '12345678',
+        hcm_person_number: '12345678',
+        client_integration_id: 'STALE-GUID',
+        email_address: { email: 'jon@gmail.com' },
+        ...overrides
+      }
+    })
+
+    const staffProfile = (overrides: Record<string, unknown> = {}) =>
+      ({
+        theKeyGuid: 'NEW-GUID',
+        login: 'jon.watson@cru.org',
+        usEmployeeId: '12345678',
+        ...overrides
+      }) as any
+
+    beforeEach(() => {
+      updateUser = vi.fn().mockResolvedValue(undefined)
+      listUsers = vi.fn().mockResolvedValue({
+        each: (fn: (u: any) => void) =>
+          [{ id: 'okta-stale-id', profile: { theKeyGuid: 'STALE-GUID', usEmployeeId: '12345678' } }].forEach(fn)
+      })
+      okta = { userApi: { listUsers, updateUser } }
+      gr = new GlobalRegistry('token', 'https://example.com', okta)
+      mockEntityPUT.mockResolvedValue({})
+    })
+
+    it.each([
+      ['no usEmployeeId', staffProfile({ usEmployeeId: undefined })],
+      ['test account', staffProfile({ login: 'test.jon@cru.org' })],
+      ['non-Cru email', staffProfile({ login: 'jon@gmail.com' })],
+      ['orca === false', staffProfile({ orca: false })]
+    ])('skips entirely when gated out: %s', async (_label, profile) => {
+      await gr.resolveAccountNumberCollision(profile)
+      expect(mockEntityGET).not.toHaveBeenCalled()
+      expect(mockEntityPUT).not.toHaveBeenCalled()
+      expect(updateUser).not.toHaveBeenCalled()
+    })
+
+    it('proceeds when orca is undefined (treated as onboarded)', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityGET).toHaveBeenCalledTimes(2)
+    })
+
+    it('queries both identifier fields', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityGET).toHaveBeenCalledWith({
+        entity_type: 'person',
+        filters: { owned_by: 'the_key', account_number: '12345678' },
+        fields: 'account_number,hcm_person_number'
+      })
+      expect(mockEntityGET).toHaveBeenCalledWith({
+        entity_type: 'person',
+        filters: { owned_by: 'the_key', hcm_person_number: '12345678' },
+        fields: 'account_number,hcm_person_number'
+      })
+    })
+
+    it('does nothing when there is no conflict', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityPUT).not.toHaveBeenCalled()
+      expect(updateUser).not.toHaveBeenCalled()
+    })
+
+    it('clears GR and Okta for a single conflict', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [conflictEntity()] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-person-id', {
+        account_number: null,
+        hcm_person_number: null
+      })
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "STALE-GUID"' })
+      expect(updateUser).toHaveBeenCalledTimes(1)
+    })
+
+    it('de-duplicates an entity returned by both queries (one PUT)', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [conflictEntity()] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityPUT).toHaveBeenCalledTimes(1)
+    })
+
+    it('clears each of multiple distinct conflicts', async () => {
+      const entityA = conflictEntity({
+        id: 'stale-A',
+        client_integration_id: 'GUID-A',
+        email_address: { email: 'a@gmail.com' }
+      })
+      const entityB = conflictEntity({
+        id: 'stale-B',
+        client_integration_id: 'GUID-B',
+        email_address: { email: 'b@gmail.com' }
+      })
+      mockEntityGET
+        .mockResolvedValueOnce({ entities: [entityA] }) // account_number query
+        .mockResolvedValueOnce({ entities: [entityB] }) // hcm_person_number query
+
+      await gr.resolveAccountNumberCollision(staffProfile())
+
+      expect(mockEntityPUT).toHaveBeenCalledTimes(2)
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-A', { account_number: null, hcm_person_number: null })
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-B', { account_number: null, hcm_person_number: null })
+      expect(updateUser).toHaveBeenCalledTimes(2)
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "GUID-A"' })
+      expect(listUsers).toHaveBeenCalledWith({ search: 'profile.theKeyGuid eq "GUID-B"' })
+    })
+
+    it('resolves an HCM-only conflict (account_number absent)', async () => {
+      const hcmOnly = conflictEntity({ account_number: undefined })
+      mockEntityGET
+        .mockResolvedValueOnce({ entities: [] })
+        .mockResolvedValueOnce({ entities: [hcmOnly] })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityPUT).toHaveBeenCalledWith('stale-person-id', {
+        account_number: null,
+        hcm_person_number: null
+      })
+    })
+
+    it('continues when one field query 400s (field not defined)', async () => {
+      mockEntityGET
+        .mockResolvedValueOnce({ entities: [conflictEntity()] })
+        .mockRejectedValueOnce({
+          statusCode: 400,
+          error: { error: "can't find entity type named 'hcm_person_number' that is a child of \"person\"" }
+        })
+      await gr.resolveAccountNumberCollision(staffProfile())
+      expect(mockEntityPUT).toHaveBeenCalledTimes(1)
+    })
+
+    it('propagates a non-field GR error from a query', async () => {
+      mockEntityGET.mockRejectedValue({ statusCode: 500, error: 'boom' })
+      await expect(gr.resolveAccountNumberCollision(staffProfile())).rejects.toBeDefined()
+    })
+
+    it('propagates a GR PUT failure (required step)', async () => {
+      mockEntityGET.mockResolvedValue({ entities: [conflictEntity()] })
+      mockEntityPUT.mockRejectedValue(new Error('put failed'))
+      await expect(gr.resolveAccountNumberCollision(staffProfile())).rejects.toThrow('put failed')
     })
   })
 

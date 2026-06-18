@@ -12,6 +12,7 @@ export interface OktaUserProfile extends UserProfile {
   login: string
   firstName: string
   lastName: string
+  orca?: boolean
   email?: string
   usDesignationNumber?: string
   usEmployeeId?: string
