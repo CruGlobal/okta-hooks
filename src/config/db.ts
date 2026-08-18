@@ -8,7 +8,14 @@ const pool = new pg.Pool({
   password: process.env.PG_PASSWORD,
   port: parseInt(process.env.PG_PORT || '5432', 10),
   max: 1,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 2000,
+  query_timeout: 2000
+})
+
+// Prevent an idle-connection termination from crashing the Lambda container.
+pool.on('error', (error) => {
+  console.error('Unexpected postgres pool error', error)
 })
 
 export default pool
