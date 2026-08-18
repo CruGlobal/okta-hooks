@@ -15,8 +15,10 @@ the `sync_restricted_domains` Lambda into a DynamoDB table
 `GetItem` per signup and returns DENY on a hit.
 
 The sheet is going away. MMD Postgres (`Domains.is_idm_self_service_prevention = true`)
-is already the authoritative source for this data (confirmed by Jon, 2026-08-18). This is
-the only feature in okta-hooks that touches the sheet or the DynamoDB table.
+is the authoritative source for this data in **staging** (confirmed by Jon, 2026-08-18).
+The **production** Postgres database has not been built out yet — Ric Poolman leads that
+task, and production promotion is gated on his confirmation (see Rollout). This is the
+only feature in okta-hooks that touches the sheet or the DynamoDB table.
 
 ## Decision summary
 
@@ -27,7 +29,10 @@ the only feature in okta-hooks that touches the sheet or the DynamoDB table.
 - **Failure mode:** unchanged. The registration handler's existing catch returns 204
   (fail open, registration allowed) if the database is unreachable.
 - **Cutover safety:** one-time parity check (current DynamoDB contents vs Postgres
-  flagged set, stage and prod) before cutover, even though Postgres is authoritative.
+  flagged set) before cutover in each environment. Stage can run now; the prod check
+  only becomes meaningful after the prod data build-out.
+- **Prod gate:** the production Postgres data pipeline is not built yet. Code is not
+  promoted to production until Ric Poolman confirms the prod pipeline is up and running.
 
 ## Code changes (okta-hooks)
 
@@ -85,13 +90,15 @@ Note the order in the PR description.
 
 ## Rollout
 
-1. Parity check: diff DynamoDB contents against Postgres flagged domains (stage and
-   prod data); surface any drift to Jon before cutover.
+1. Stage parity check: diff stage DynamoDB contents against stage Postgres flagged
+   domains; surface any drift to Jon before cutover.
 2. Apply TF PR 1 (MMD dirs, then okta-hooks dirs).
 3. Code PR to okta-hooks → `On Staging` label → verify in oktapreview: flagged domain
    gets DENY; normal domain registers.
-4. Merge code PR to master (prod deploy); verify in prod.
-5. TF PR 2 + manual SSM cleanup.
+4. **HOLD for prod gate:** wait for Ric Poolman to confirm the production Postgres
+   pipeline is up and running. Then run the prod parity check.
+5. Merge code PR to master (prod deploy); verify in prod.
+6. TF PR 2 + manual SSM cleanup.
 
 ## Testing
 
