@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider registration and event processing. Integrates with Okta, AWS (SNS/DynamoDB), Google Sheets, and CruGlobal's Global Registry.
+Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider registration and event processing. Integrates with Okta, AWS (SNS), MMD Postgres, and CruGlobal's Global Registry.
 
 ## Common Commands
 
@@ -27,7 +27,7 @@ npm run test tests/path/to/file.test.ts
 **Lambda Handlers** (`src/handlers/`):
 
 1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
-   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (queried from MMD Postgres)
    - `verification.ts` - Verification endpoint for Okta hook setup
    - `events.ts` - Event hook: routes Okta events to SNS topic
 
@@ -37,13 +37,12 @@ npm run test tests/path/to/file.test.ts
    - `user-account-update-profile.ts` - Syncs profile and email changes
 
 3. **Scheduled Handlers** (`schedule/`)
-   - `sync-restricted-domains.ts` - Syncs restricted domains from Google Sheets to DynamoDB (every 3 hours)
    - `sync-missing-okta-users.ts` - Re-syncs users missing Global Registry IDs (every 30 minutes)
 
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - DynamoDB + Google Sheets integration for blocked email domains
+- `RestrictedDomains` - Queries MMD Postgres (`Domains.is_idm_self_service_prevention`) for blocked email domains
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
 ## Code Conventions
