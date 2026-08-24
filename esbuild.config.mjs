@@ -11,7 +11,6 @@ const handlerMap = {
   './src/handlers/sns/user-lifecycle-create.ts': 'create',
   './src/handlers/sns/user-lifecycle-status-change.ts': 'status_change',
   './src/handlers/sns/user-account-update-profile.ts': 'update_profile',
-  './src/handlers/schedule/sync-restricted-domains.ts': 'sync_restricted_domains',
   './src/handlers/schedule/sync-missing-okta-users.ts': 'sync_missing_okta_users'
 }
 
@@ -28,7 +27,9 @@ for (const [input, output] of Object.entries(handlerMap)) {
     format: 'cjs',
     external: [
       // AWS SDK v3 is included in Lambda runtime
-      '@aws-sdk/*'
+      '@aws-sdk/*',
+      // Optional native binding referenced by pg; not installed
+      'pg-native'
     ],
     define: {
       'process.env.SOURCEMAP_VERSION': JSON.stringify(version)
