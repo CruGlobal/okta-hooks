@@ -60,4 +60,22 @@ npm run test tests/path/to/file.test.ts
 Uses esbuild (`esbuild.config.mjs`) to bundle handlers:
 - Each handler is bundled separately to `dist/` as CommonJS (for DataDog Lambda layer compatibility)
 - AWS SDK v3 is externalized (included in Lambda runtime)
-- Infrastructure managed via Terraform (linked at `okta-hooks-terraform-config`)
+
+This app runs on Cru's build-once / promote pipeline (pipeline v2):
+
+- `.github/workflows/pipeline-v2.yml` builds a single environment-neutral
+  container image from the default branch — nightly at 05:00 UTC and on manual
+  dispatch. Builds do **not** run on push/merge.
+- Each build produces a candidate that is deployed to the release-candidate
+  surface automatically. Promotion to production is a separate, manual step run
+  from `cru-deploy`; production moves only on a promote, never on merge.
+- The image is environment-agnostic: `PROJECT_NAME` and `ENVIRONMENT` are
+  injected as function environment variables at runtime, so the same image bytes
+  run in every environment. `DD_VERSION` is the only build-baked identity value.
+- `.github/workflows/nodejs.yml` is the PR CI gate (the `test` check); it no
+  longer builds or deploys.
+- Infrastructure (Lambda functions, IAM, triggers, SSM parameters) is managed
+  with Terraform in `CruGlobal/cru-terraform` under `applications/okta-hooks/`.
+
+This pipeline replaces the former `staging` branch build loop and the retired v1
+`build-deploy-lambda.yml` workflow.

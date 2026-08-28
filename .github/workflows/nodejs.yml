@@ -1,10 +1,11 @@
 name: Node.js CI
 
 on:
-  push:
-    branches: [ master, staging ]
   pull_request:
-    branches: [ master ]
+    # `master` only for the duration of the master -> main rename.
+    branches: [main, master]
+  push:
+    branches: [main, master]
 
 jobs:
   test:
