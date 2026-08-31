@@ -27,7 +27,7 @@ npm run test tests/path/to/file.test.ts
 **Lambda Handlers** (`src/handlers/`):
 
 1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
-   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (queried from MMD Postgres)
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (source selected by `RESTRICTED_DOMAINS_SOURCE`)
    - `verification.ts` - Verification endpoint for Okta hook setup
    - `events.ts` - Event hook: routes Okta events to SNS topic
 
@@ -38,11 +38,12 @@ npm run test tests/path/to/file.test.ts
 
 3. **Scheduled Handlers** (`schedule/`)
    - `sync-missing-okta-users.ts` - Re-syncs users missing Global Registry IDs (every 30 minutes)
+   - `sync-restricted-domains.ts` - Syncs restricted domains from the IDM Google Sheet into DynamoDB (every 3 hours)
 
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - Queries MMD Postgres (`Domains.is_idm_self_service_prevention`) for blocked email domains
+- `RestrictedDomains` - Looks up blocked email domains. `RESTRICTED_DOMAINS_SOURCE=postgres` queries MMD Postgres (`Domains.is_idm_self_service_prevention`); any other value (including unset) reads the DynamoDB table kept fresh by the Google Sheet sync. The toggle exists until MMD prod go-live; the sync always runs so DynamoDB stays a warm fallback.
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
 ## Code Conventions
