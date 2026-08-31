@@ -27,7 +27,7 @@ npm run test tests/path/to/file.test.ts
 **Lambda Handlers** (`src/handlers/`):
 
 1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
-   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (source selected by `RESTRICTED_DOMAINS_SOURCE`)
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (source selected by the `restricted_domains_postgres` feature flag)
    - `verification.ts` - Verification endpoint for Okta hook setup
    - `events.ts` - Event hook: routes Okta events to SNS topic
 
@@ -43,7 +43,7 @@ npm run test tests/path/to/file.test.ts
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - Looks up blocked email domains. `RESTRICTED_DOMAINS_SOURCE=postgres` queries MMD Postgres (`Domains.is_idm_self_service_prevention`); any other value (including unset) reads the DynamoDB table kept fresh by the Google Sheet sync. The toggle exists until MMD prod go-live; the sync always runs so DynamoDB stays a warm fallback.
+- `RestrictedDomains` - Looks up blocked email domains. The `restricted_domains_postgres` feature flag (pipeline v2 flag service, read via `@cruglobal/flags`) selects MMD Postgres (`Domains.is_idm_self_service_prevention`); while disabled or absent it reads the DynamoDB table kept fresh by the Google Sheet sync. The flag exists until MMD prod go-live (`cru app flags enable restricted_domains_postgres -n okta-hooks -e production`); the sync always runs so DynamoDB stays a warm fallback.
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
 ## Code Conventions

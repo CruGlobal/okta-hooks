@@ -4,6 +4,7 @@ import { DynamoDBDocumentClient, GetCommand, ScanCommand, BatchWriteCommand } fr
 import { auth, sheets } from '@googleapis/sheets'
 import { compact, toLower, has, difference, concat, chunk, uniq } from 'lodash'
 import pool from '../config/db.js'
+import flags from '../config/flags.js'
 
 type DynamoDbRequestType = 'put' | 'delete'
 
@@ -53,8 +54,9 @@ const isRestrictedInDynamoDb = async (domain: string): Promise<boolean> => {
 }
 
 class RestrictedDomains {
-  // RESTRICTED_DOMAINS_SOURCE=postgres reads MMD Postgres; any other value
-  // (including unset) reads the DynamoDB table until MMD prod go-live.
+  // The restricted_domains_postgres feature flag selects MMD Postgres; while
+  // disabled (or absent — flags default off) the DynamoDB table is used.
+  // Enable it at MMD prod go-live: cru app flags enable restricted_domains_postgres -n okta-hooks
   static async isRestricted(emailAddress: string): Promise<boolean> {
     const parsedAddress = parseOneAddress(emailAddress) as ParsedMailbox | null
 
@@ -63,7 +65,8 @@ class RestrictedDomains {
     }
 
     const domain = toLower(parsedAddress.domain)
-    if (process.env.RESTRICTED_DOMAINS_SOURCE === 'postgres') {
+    await flags.refresh()
+    if (flags.enabled('restricted_domains_postgres')) {
       return isRestrictedInPostgres(domain)
     }
     return isRestrictedInDynamoDb(domain)
