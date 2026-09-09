@@ -28,14 +28,14 @@
     "@types/node": "^22.10.7",
     "@types/pg": "^8.23.1",
     "@types/uuid": "^10.0.0",
-    "@vitest/coverage-v8": "^3.0.4",
+    "@vitest/coverage-v8": "^5.0.0",
     "dotenv": "^17.2.3",
     "esbuild": "^0.24.2",
     "eslint": "^9.18.0",
     "glob": "^11.0.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.21.0",
-    "vitest": "^3.0.4"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1122.0",
