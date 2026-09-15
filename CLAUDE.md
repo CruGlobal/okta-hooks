@@ -46,6 +46,85 @@ npm run test tests/path/to/file.test.ts
 - `RestrictedDomains` - Looks up blocked email domains. The `restricted_domains_postgres` feature flag (pipeline v2 flag service, read via `@cruglobal/flags`) selects MMD Postgres (`Domains.is_idm_self_service_prevention`); while disabled or absent it reads the DynamoDB table kept fresh by the Google Sheet sync. The flag exists until MMD prod go-live (`cru app flags enable restricted_domains_postgres -n okta-hooks -e production`); the sync always runs so DynamoDB stays a warm fallback.
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
+## Global Registry access is scoped by credential
+
+A GR bearer token grants visibility into the entities its client system is
+configured to see. **An empty result means "not visible to this token", never
+"not present in GR".** Do not conclude a namespace is absent without first
+confirming the credential could have seen it.
+
+| Entities owned by | Use these credentials | Stage host |
+|---|---|---|
+| `the_key` (and the `hcm` view we read) | okta-hooks | `https://stage-backend.global-registry.org` |
+| `pshr` | us-onboarding (`cru app secrets read -n us-onboarding -e staging --keys GLOBAL_REGISTRY_HOST --keys GLOBAL_REGISTRY_API_TOKEN`) | `https://stage-api.global-registry.org` |
+
+The two hostnames front the same GR instance; entity ids are identical across
+them, so an id resolved with one token can be fetched with the other.
+
+Query semantics, verified 2026-09-14: `filters[<field>]` matches against the
+entity across **all** systems' values, while `filters[owned_by]` only selects
+which system's attribute view is **rendered**. A filter hit therefore does not
+mean the matched value belongs to the system you filtered by. Searching the
+`pshr` namespace for `account_number=000414026` returns an entity whose `pshr`
+view renders `account_number=000559826`. Read values from the rendered view;
+never infer them from the fact that a filter matched.
+
+## Employee identifiers after HCM go-live: do not "fix" buildPersonEntity
+
+**Okta is the system of record for employee identifiers, not Global Registry.**
+That single fact resolves a question that otherwise looks like a bug.
+
+`buildPersonEntity` (`src/models/global-registry.ts`) writes the one Okta
+`profile.usEmployeeId` value into **both** `account_number` and
+`hcm_person_number` on the `the_key`-owned person entity, plus all three linked
+identities. That looks wrong, because the two GR fields mean different things:
+`account_number` is the legacy PeopleSoft HR EMPLID and `hcm_person_number` is
+the Oracle HCM Person Number. `usEmployeeId` holds the PSHR EMPLID today and
+will hold the HCM Person Number after go-live.
+
+**It is not wrong, and it needs no change.** Per Jon Watson, 2026-09-15:
+
+- After HCM go-live, `account_number` on the `the_key`-owned person entity is
+  no longer needed and can be ignored entirely. Nothing consumes it.
+- The legacy PSHR EMPLID is preserved in Okta `profile.pshrEMPLID` if it is
+  ever needed again, so nothing is lost by GR not holding it.
+- `account_number` ending up with the HCM Person Number is harmless, and
+  arguably more correct: HCM becomes the system of record, so the field then
+  holds the person's real account number from the authoritative system.
+
+Flightdeck OKHOOKS-4 proposed splitting the two sources and was **cancelled**
+for exactly this reason. The code was right; the analysis lacked this context.
+Do not re-derive that ticket.
+
+Two related facts that remain true and are worth keeping:
+
+- okta-hooks never writes a GR-derived value back into `usEmployeeId`. The only
+  Okta profile fields it sets from GR data are `thekeyGrPersonId` and
+  `grMasterPersonId`.
+- `clearStaleOktaEmployeeId` blanking `usEmployeeId` is **intentional design,
+  not a defect**: no two GR accounts may hold the same `usEmployeeId`, so
+  clearing the stale account's copy is how that uniqueness is enforced. Leave
+  it alone.
+- `pshrEMPLID` appears nowhere in `src/` or `tests/`. Every `updateUser` call
+  sends the whole fetched user object back, so the field round-trips unchanged.
+  Keep it that way: PSHR SAML authentication matches on `pshrEMPLID`, and the
+  value is frozen historical data with no repopulation path.
+
+## Bulk Okta edits flood the update_profile pipeline
+
+Any batch that writes an Okta profile field across many accounts emits one
+`user.account.update_profile` event per account, which floods the SNS topic and
+times out `okta-hooks-*-update_profile` en masse. This happened twice in August
+2026 from the EMPLID migration batches (PSHR EMPLID into `streetAddress`, then
+moving it to `pshrEMPLID` and clearing `streetAddress`). It is expected
+behavior for a bulk edit, not an incident.
+
+Dropped events from such a flood are acceptable: they are profile updates
+propagating to `the_key`-owned GR person entities, and what matters is that the
+values landed correctly **in Okta**. If GR missed some, replay the migration
+manifest against GR directly. Flightdeck OKHOOKS-2 proposed a dead-letter queue
+for this and was **cancelled** — a one-off migration does not justify one.
+
 ## Code Conventions
 
 - TypeScript with ES modules (`import`/`export`)
