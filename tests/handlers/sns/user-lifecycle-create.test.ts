@@ -106,3 +106,39 @@ describe('user.lifecycle.create SNS message', () => {
     expect(rollbar.error).toHaveBeenCalled()
   })
 })
+
+// Regression guard for the 2026-09-16 finding: a live Global Registry bearer
+// token reached Datadog in plaintext. request-promise attaches the outbound
+// request (Authorization header included) to the errors it throws; this handler
+// rethrows, and the Lambda runtime serialises the whole object into its log line.
+describe('credential redaction on failure', () => {
+  const grErrorWithToken = () => {
+    const error = new Error('400 - {"error":"Another entity exists"}') as Error & Record<string, any>
+    error.name = 'StatusCodeError'
+    error.options = { headers: { Authorization: 'Bearer LIVE-GR-TOKEN' }, uri: '/entities/' }
+    error.response = { request: { headers: { Authorization: 'Bearer LIVE-GR-TOKEN' } } }
+    return error
+  }
+
+  it('strips the bearer token from the error it rethrows and reports', async () => {
+    mockGetUser.mockResolvedValue({ status: 'ACTIVE', profile: {} })
+    mockCreateOrUpdateProfile.mockRejectedValue(grErrorWithToken())
+
+    const thrown = await handler(created as any).then(
+      () => { throw new Error('handler was expected to rethrow') },
+      (e) => e
+    )
+
+    // What the Lambda runtime would serialise into its "Invoke Error" line.
+    expect(JSON.stringify(thrown)).not.toContain('LIVE-GR-TOKEN')
+    expect(thrown.options.headers.Authorization).toBe('[REDACTED]')
+    expect(thrown.response.request.headers.Authorization).toBe('[REDACTED]')
+    // Still diagnosable.
+    expect(thrown.options.uri).toBe('/entities/')
+    expect(thrown.message).toContain('Another entity exists')
+
+    // And what was sent to Rollbar.
+    const reported = vi.mocked(rollbar.error).mock.calls[0][1]
+    expect(JSON.stringify(reported)).not.toContain('LIVE-GR-TOKEN')
+  })
+})

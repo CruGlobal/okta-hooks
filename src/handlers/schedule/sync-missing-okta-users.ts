@@ -2,6 +2,7 @@ import type { ScheduledEvent } from 'aws-lambda'
 import { Client } from '@okta/okta-sdk-nodejs'
 import rollbar from '../../config/rollbar.js'
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns'
+import redactError from '../../utils/redact-error.js'
 
 export const handler = async (lambdaEvent: ScheduledEvent): Promise<void> => {
   const okta = new Client({ cacheMiddleware: null })
@@ -38,7 +39,9 @@ export const handler = async (lambdaEvent: ScheduledEvent): Promise<void> => {
 
     await Promise.allSettled(processed)
   } catch (error) {
-    await rollbar.error('sync-missing-okta-users Error', error as Error, { lambdaEvent })
+    // Strip credentials before anything serialises this error: the rethrow below
+    // reaches the Lambda runtime's log line, which the Datadog extension ships.
+    await rollbar.error('sync-missing-okta-users Error', redactError(error) as Error, { lambdaEvent })
     throw error
   }
 }

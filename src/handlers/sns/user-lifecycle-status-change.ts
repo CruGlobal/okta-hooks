@@ -4,6 +4,7 @@ import OktaEvent from '../../models/okta-event.js'
 import rollbar from '../../config/rollbar.js'
 import GlobalRegistry from '../../models/global-registry.js'
 import type { OktaUserProfile } from '../../types/okta.js'
+import redactError from '../../utils/redact-error.js'
 
 export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
   const okta = new Client({ cacheMiddleware: null })
@@ -26,7 +27,9 @@ export const handler = async (lambdaEvent: SNSEvent): Promise<void> => {
         break
     }
   } catch (error) {
-    await rollbar.error('status-change Error', error as Error, { lambdaEvent })
+    // Strip credentials before anything serialises this error: the rethrow below
+    // reaches the Lambda runtime's log line, which the Datadog extension ships.
+    await rollbar.error('status-change Error', redactError(error) as Error, { lambdaEvent })
     throw error
   }
 }
