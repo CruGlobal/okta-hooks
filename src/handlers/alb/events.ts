@@ -4,6 +4,7 @@ import HookResponse from '../../models/hook-response.js'
 import OktaRequest from '../../models/okta-request.js'
 import rollbar from '../../config/rollbar.js'
 import { includes } from 'lodash'
+import redactError from '../../utils/redact-error.js'
 
 export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
   try {
@@ -26,7 +27,9 @@ export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
     )
     return new HookResponse({ statusCode: 204 }).toALBResponse()
   } catch (error) {
-    await rollbar.error('events hook Error', error as Error, { lambdaEvent })
+    // Strip credentials before anything serialises this error: the rethrow below
+    // reaches the Lambda runtime's log line, which the Datadog extension ships.
+    await rollbar.error('events hook Error', redactError(error) as Error, { lambdaEvent })
     // Return 500 to okta to allow it to retry
     return new HookResponse({ statusCode: 500 }).toALBResponse()
   }

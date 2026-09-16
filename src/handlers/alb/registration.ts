@@ -7,6 +7,7 @@ import GUID from '../../models/guid.js'
 import rollbar from '../../config/rollbar.js'
 import RestrictedDomains from '../../models/restricted-domains.js'
 import RegistrationRequest from '../../models/registration-request.js'
+import redactError from '../../utils/redact-error.js'
 
 export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
   try {
@@ -28,7 +29,9 @@ export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
     return response.toALBResponse()
   } catch (error) {
     // Log error to rollbar
-    await rollbar.error('registration hook Error', error as Error, { lambdaEvent })
+    // Strip credentials before anything serialises this error: the rethrow below
+    // reaches the Lambda runtime's log line, which the Datadog extension ships.
+    await rollbar.error('registration hook Error', redactError(error) as Error, { lambdaEvent })
     // Return success to okta, `user.lifecycle.create` event hook will add a GUID if necessary
     return new HookResponse({ statusCode: 204 }).toALBResponse()
   }
