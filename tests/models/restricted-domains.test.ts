@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import RestrictedDomains from '@/models/restricted-domains.js'
 import pool from '@/config/db.js'
-import flags from '@/config/flags.js'
 import {
   auth,
   sheets,
@@ -9,18 +8,12 @@ import {
 } from '../mocks/googleapis-sheets.js'
 import {
   mockDynamoDBSend,
-  DynamoDBDocumentClient,
-  GetCommand,
   ScanCommand,
   BatchWriteCommand
 } from '../mocks/aws-sdk-v3.js'
 
 vi.mock('@/config/db.js', () => ({
   default: { query: vi.fn() }
-}))
-
-vi.mock('@/config/flags.js', () => ({
-  default: { enabled: vi.fn(), refresh: vi.fn() }
 }))
 
 vi.mock('@aws-sdk/client-dynamodb', async () => {
@@ -32,7 +25,6 @@ vi.mock('@aws-sdk/lib-dynamodb', async () => {
   const mock = await import('../mocks/aws-sdk-v3.js')
   return {
     DynamoDBDocumentClient: mock.DynamoDBDocumentClient,
-    GetCommand: mock.GetCommand,
     ScanCommand: mock.ScanCommand,
     BatchWriteCommand: mock.BatchWriteCommand
   }
@@ -44,84 +36,69 @@ vi.mock('@googleapis/sheets', async () => {
 })
 
 const mockQuery = vi.mocked(pool.query)
-const mockFlagEnabled = vi.mocked(flags.enabled)
-const mockFlagRefresh = vi.mocked(flags.refresh)
 
 describe('RestrictedDomains', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockFlagEnabled.mockReturnValue(false)
   })
 
   describe('static isRestricted(emailAddress)', () => {
-    describe('with the restricted_domains_postgres flag enabled', () => {
-      beforeEach(() => {
-        mockFlagEnabled.mockReturnValue(true)
-      })
+    let mockFetch: ReturnType<typeof vi.spyOn>
 
-      it('is true when the domain is flagged in MMD Postgres', async () => {
-        mockQuery.mockResolvedValue({ rowCount: 1, rows: [{ '?column?': 1 }] } as never)
-        const result = await RestrictedDomains.isRestricted('tony.stark@Avengers.org')
-        expect(result).toBe(true)
-        expect(mockQuery).toHaveBeenCalledWith(
-          'SELECT 1 FROM "Domains" WHERE lower(domain) = $1 AND is_idm_self_service_prevention = true LIMIT 1',
-          ['avengers.org']
-        )
-        expect(mockDynamoDBSend).not.toHaveBeenCalled()
-        expect(mockFlagRefresh).toHaveBeenCalled()
-        expect(mockFlagEnabled).toHaveBeenCalledWith('restricted_domains_postgres')
-      })
-
-      it('is false when the domain is not flagged', async () => {
-        mockQuery.mockResolvedValue({ rowCount: 0, rows: [] } as never)
-        const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
-        expect(result).toBe(false)
-      })
-
-      it('is false for an invalid email address without querying', async () => {
-        const result = await RestrictedDomains.isRestricted('not-a-valid-email')
-        expect(result).toBe(false)
-        expect(mockQuery).not.toHaveBeenCalled()
-      })
-
-      it('propagates query errors (registration handler fails open)', async () => {
-        mockQuery.mockRejectedValue(new Error('connection refused'))
-        await expect(RestrictedDomains.isRestricted('tony.stark@avengers.org'))
-          .rejects.toThrow('connection refused')
-      })
+    beforeEach(() => {
+      // Deployed Lambdas have CRU_FLAGS_URL injected by terraform. Set it here so
+      // any call to the pipeline v2 flag service would surface as a fetch.
+      vi.stubEnv('CRU_FLAGS_URL', 'https://flags.example.com/okta-hooks')
+      mockFetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no network in tests'))
     })
 
-    describe('with the restricted_domains_postgres flag disabled (default)', () => {
-      it('is true when the domain is in the DynamoDB table', async () => {
-        mockDynamoDBSend.mockResolvedValue({ Item: { DomainName: 'avengers.org' } })
-        const result = await RestrictedDomains.isRestricted('tony.stark@Avengers.org')
-        expect(result).toBe(true)
-        expect(DynamoDBDocumentClient.from).toHaveBeenCalled()
-        expect(GetCommand).toHaveBeenCalledWith({
-          TableName: 'restricted_domains_dynamodb',
-          Key: { DomainName: 'avengers.org' }
-        })
-        expect(mockQuery).not.toHaveBeenCalled()
-      })
+    afterEach(() => {
+      vi.unstubAllEnvs()
+      mockFetch.mockRestore()
+    })
 
-      it('is false when the domain is not in the DynamoDB table', async () => {
-        mockDynamoDBSend.mockResolvedValue({})
-        const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
-        expect(result).toBe(false)
-      })
+    it('is true when the domain is flagged in MMD Postgres', async () => {
+      mockQuery.mockResolvedValue({ rowCount: 1, rows: [{ '?column?': 1 }] } as never)
+      const result = await RestrictedDomains.isRestricted('tony.stark@Avengers.org')
+      expect(result).toBe(true)
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT 1 FROM "Domains" WHERE lower(domain) = $1 AND is_idm_self_service_prevention = true LIMIT 1',
+        ['avengers.org']
+      )
+    })
 
-      it('is false for an invalid email address without querying or refreshing flags', async () => {
-        const result = await RestrictedDomains.isRestricted('not-a-valid-email')
-        expect(result).toBe(false)
-        expect(mockDynamoDBSend).not.toHaveBeenCalled()
-        expect(mockFlagRefresh).not.toHaveBeenCalled()
-      })
+    it('is false when the domain is not flagged in MMD Postgres', async () => {
+      mockQuery.mockResolvedValue({ rowCount: 0, rows: [] } as never)
+      const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
+      expect(result).toBe(false)
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+    })
 
-      it('refreshes the flag snapshot before deciding', async () => {
-        mockDynamoDBSend.mockResolvedValue({})
-        await RestrictedDomains.isRestricted('tony.stark@avengers.org')
-        expect(mockFlagRefresh).toHaveBeenCalled()
-      })
+    it('treats a null rowCount as not restricted', async () => {
+      mockQuery.mockResolvedValue({ rowCount: null, rows: [] } as never)
+      const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
+      expect(result).toBe(false)
+    })
+
+    it('never reads the DynamoDB table or calls the flag service', async () => {
+      mockQuery.mockResolvedValue({ rowCount: 0, rows: [] } as never)
+      await RestrictedDomains.isRestricted('tony.stark@avengers.org')
+      expect(mockDynamoDBSend).not.toHaveBeenCalled()
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('is false for an invalid email address without querying', async () => {
+      const result = await RestrictedDomains.isRestricted('not-a-valid-email')
+      expect(result).toBe(false)
+      expect(mockQuery).not.toHaveBeenCalled()
+      expect(mockDynamoDBSend).not.toHaveBeenCalled()
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('propagates query errors (registration handler fails open)', async () => {
+      mockQuery.mockRejectedValue(new Error('connection refused'))
+      await expect(RestrictedDomains.isRestricted('tony.stark@avengers.org'))
+        .rejects.toThrow('connection refused')
     })
   })
 
