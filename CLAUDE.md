@@ -27,7 +27,7 @@ npm run test tests/path/to/file.test.ts
 **Lambda Handlers** (`src/handlers/`):
 
 1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
-   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (source selected by the `restricted_domains_postgres` feature flag)
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (looked up in MMD Postgres)
    - `verification.ts` - Verification endpoint for Okta hook setup
    - `events.ts` - Event hook: routes Okta events to SNS topic
 
@@ -43,7 +43,7 @@ npm run test tests/path/to/file.test.ts
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - Looks up blocked email domains. The `restricted_domains_postgres` feature flag (pipeline v2 flag service, read via `@cruglobal/flags`) selects MMD Postgres (`Domains.is_idm_self_service_prevention`); while disabled or absent it reads the DynamoDB table kept fresh by the Google Sheet sync. The flag exists until MMD prod go-live (`cru app flags enable restricted_domains_postgres -n okta-hooks -e production`); the sync always runs so DynamoDB stays a warm fallback.
+- `RestrictedDomains` - Looks up blocked email domains in MMD Postgres (`Domains.is_idm_self_service_prevention`), the only source for blocking. The Google Sheet -> DynamoDB sync (`sync-restricted-domains.ts`) still runs, but nothing reads the table for blocking; removing its infrastructure is a separate cru-terraform change. The `restricted_domains_postgres` feature flag that used to pick the source was retired 2026-10-02. Checking it called the pipeline v2 flag service on every sign-up, which often timed out and pushed the inline hook past Okta's 3s limit. The flag is left in place in the flag service, because `cru app flags rm` burns the name forever.
 - `GlobalRegistry` - CruGlobal registry client wrapper
 
 ## Global Registry access is scoped by credential

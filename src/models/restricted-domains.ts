@@ -1,10 +1,9 @@
 import { parseOneAddress, ParsedMailbox } from 'email-addresses'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, GetCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
+import { DynamoDBDocumentClient, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
 import { auth, sheets } from '@googleapis/sheets'
-import { compact, toLower, has, difference, concat, chunk, uniq } from 'lodash'
+import { compact, toLower, difference, concat, chunk, uniq } from 'lodash'
 import pool from '../config/db.js'
-import flags from '../config/flags.js'
 
 type DynamoDbRequestType = 'put' | 'delete'
 
@@ -42,21 +41,9 @@ const isRestrictedInPostgres = async (domain: string): Promise<boolean> => {
   return (result.rowCount ?? 0) > 0
 }
 
-const isRestrictedInDynamoDb = async (domain: string): Promise<boolean> => {
-  const documentClient = getDocumentClient()
-  const result = await documentClient.send(
-    new GetCommand({
-      TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
-      Key: { DomainName: domain }
-    })
-  )
-  return has(result, 'Item')
-}
-
 class RestrictedDomains {
-  // The restricted_domains_postgres feature flag selects MMD Postgres; while
-  // disabled (or absent — flags default off) the DynamoDB table is used.
-  // Enable it at MMD prod go-live: cru app flags enable restricted_domains_postgres -n okta-hooks
+  // MMD Postgres is the only source for blocking. The Google Sheet -> DynamoDB
+  // sync below still runs, but nothing reads the table for this check.
   static async isRestricted(emailAddress: string): Promise<boolean> {
     const parsedAddress = parseOneAddress(emailAddress) as ParsedMailbox | null
 
@@ -64,12 +51,7 @@ class RestrictedDomains {
       return false
     }
 
-    const domain = toLower(parsedAddress.domain)
-    await flags.refresh()
-    if (flags.enabled('restricted_domains_postgres')) {
-      return isRestrictedInPostgres(domain)
-    }
-    return isRestrictedInDynamoDb(domain)
+    return isRestrictedInPostgres(toLower(parsedAddress.domain))
   }
 
   async allDomains(): Promise<string[]> {
