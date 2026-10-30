@@ -65,6 +65,55 @@ describe('registration hook', () => {
     })
   })
 
+  describe('locale query parameter', () => {
+    const withLocale = (locale: string) => ({ ...registrationEvent, queryStringParameters: { locale } })
+
+    it('should add an allowed locale to the profile update', async () => {
+      vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
+      const response = await handler(withLocale('fr_FR') as any)
+      expect(JSON.parse(response.body ?? '')).toStrictEqual({
+        commands: [{
+          type: 'com.okta.user.profile.update',
+          value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false, locale: 'fr_FR' }
+        }]
+      })
+    })
+
+    it('should return the restricted domain error in French', async () => {
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
+      const response = await handler(withLocale('fr_FR') as any)
+      const body = JSON.parse(response.body ?? '')
+      expect(body.commands).toStrictEqual([{ type: 'com.okta.action.update', value: { registration: 'DENY' } }])
+      expect(body.error.errorCauses[0].errorSummary)
+        .toBe("Veuillez contacter help@checkmyokta.com avant d'utiliser ce domaine de messagerie.")
+    })
+
+    it('should ignore a locale that is not allowed', async () => {
+      vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
+      const response = await handler(withLocale('de_DE') as any)
+      expect(JSON.parse(response.body ?? '').commands[0].value)
+        .toStrictEqual({ theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false })
+    })
+
+    it('should keep the English error for a locale that is not allowed', async () => {
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
+      const response = await handler(withLocale('de_DE') as any)
+      expect(JSON.parse(response.body ?? '').error.errorCauses[0].errorSummary)
+        .toBe('help@checkmyokta.com must be contacted before this email domain can be used.')
+    })
+
+    it('should work when the ALB event has no query string parameters', async () => {
+      vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
+      const { queryStringParameters: _unused, ...eventWithoutQuery } = registrationEvent
+      const response = await handler(eventWithoutQuery as any)
+      expect(JSON.parse(response.body ?? '').commands[0].value)
+        .toStrictEqual({ theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false })
+    })
+  })
+
   it('should log to rollbar on error and return success to okta', async () => {
     vi.spyOn(GUID, 'create').mockImplementation(() => {
       throw new Error('Ohh noes!!')
