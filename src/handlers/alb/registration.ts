@@ -9,15 +9,15 @@ import RestrictedDomains from '../../models/restricted-domains.js'
 import RegistrationRequest from '../../models/registration-request.js'
 import redactError from '../../utils/redact-error.js'
 
-// Set by a per-policy inline hook URI (e.g. `/registration?locale=fr_FR`) so Okta
-// sends the activation email in that language. Without it, behaviour is unchanged.
+// Set by a per-policy inline hook's `X-Cru-Locale` header so Okta sends the
+// activation email in that language. Without it, behaviour is unchanged.
 const ALLOWED_LOCALES = new Set(['fr_FR'])
 
 export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
   try {
     const response = new HookResponse()
     const registration = new RegistrationRequest(lambdaEvent.body ?? '')
-    const requestedLocale = lambdaEvent.queryStringParameters?.locale
+    const requestedLocale = lambdaEvent.headers?.['x-cru-locale']
     const locale = requestedLocale && ALLOWED_LOCALES.has(requestedLocale) ? requestedLocale : undefined
     if (await RestrictedDomains.isRestricted(registration.login)) {
       response.addCommand(COMMAND_ACTION_UPDATE, { registration: 'DENY' })

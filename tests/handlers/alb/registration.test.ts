@@ -65,8 +65,8 @@ describe('registration hook', () => {
     })
   })
 
-  describe('locale query parameter', () => {
-    const withLocale = (locale: string) => ({ ...registrationEvent, queryStringParameters: { locale } })
+  describe('X-Cru-Locale header', () => {
+    const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
 
     it('should add an allowed locale to the profile update', async () => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
@@ -104,11 +104,11 @@ describe('registration hook', () => {
         .toBe('help@checkmyokta.com must be contacted before this email domain can be used.')
     })
 
-    it('should work when the ALB event has no query string parameters', async () => {
+    it('should work when the ALB event has no headers', async () => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
-      const { queryStringParameters: _unused, ...eventWithoutQuery } = registrationEvent
-      const response = await handler(eventWithoutQuery as any)
+      const { headers: _unused, ...eventWithoutHeaders } = registrationEvent
+      const response = await handler(eventWithoutHeaders as any)
       expect(JSON.parse(response.body ?? '').commands[0].value)
         .toStrictEqual({ theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false })
     })
