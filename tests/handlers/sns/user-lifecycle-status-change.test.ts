@@ -69,4 +69,22 @@ describe('status change handler', () => {
     await expect(handler(deactivateEvent as any)).rejects.toThrow('Ohh noes!!')
     expect(rollbar.error).toHaveBeenCalled()
   })
+
+  it('should skip a user Okta has already deleted', async () => {
+    mockGetUser.mockRejectedValue(
+      Object.assign(new Error('Okta HTTP 404 E0000007 Not found: Resource not found'), { status: 404, errorCode: 'E0000007' })
+    )
+    await expect(handler(deactivateEvent as any)).resolves.toBeUndefined()
+    expect(mockDeleteProfile).not.toHaveBeenCalled()
+    expect(mockUpdateUser).not.toHaveBeenCalled()
+    expect(rollbar.error).not.toHaveBeenCalled()
+  })
+
+  it('should still report other Okta errors', async () => {
+    mockGetUser.mockRejectedValue(
+      Object.assign(new Error('Okta HTTP 500 E0000009 Internal Server Error'), { status: 500, errorCode: 'E0000009' })
+    )
+    await expect(handler(deactivateEvent as any)).rejects.toThrow('E0000009')
+    expect(rollbar.error).toHaveBeenCalled()
+  })
 })
