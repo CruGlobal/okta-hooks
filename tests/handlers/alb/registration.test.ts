@@ -68,25 +68,27 @@ describe('registration hook', () => {
   describe('X-Cru-Locale header', () => {
     const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
 
-    it('should add an allowed locale to the profile update', async () => {
+    it.each(['fr_FR', 'pt_BR'])('should add the allowed locale %s to the profile update', async (locale) => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
-      const response = await handler(withLocale('fr_FR') as any)
+      const response = await handler(withLocale(locale) as any)
       expect(JSON.parse(response.body ?? '')).toStrictEqual({
         commands: [{
           type: 'com.okta.user.profile.update',
-          value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false, locale: 'fr_FR' }
+          value: { theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false, locale }
         }]
       })
     })
 
-    it('should return the restricted domain error in French', async () => {
+    it.each([
+      ['fr_FR', "Veuillez contacter help@checkmyokta.com avant d'utiliser ce domaine de messagerie."],
+      ['pt_BR', 'Entre em contato com help@checkmyokta.com antes de usar este domínio de e-mail.']
+    ])('should return the restricted domain error for %s in that language', async (locale, errorSummary) => {
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
-      const response = await handler(withLocale('fr_FR') as any)
+      const response = await handler(withLocale(locale) as any)
       const body = JSON.parse(response.body ?? '')
       expect(body.commands).toStrictEqual([{ type: 'com.okta.action.update', value: { registration: 'DENY' } }])
-      expect(body.error.errorCauses[0].errorSummary)
-        .toBe("Veuillez contacter help@checkmyokta.com avant d'utiliser ce domaine de messagerie.")
+      expect(body.error.errorCauses[0].errorSummary).toBe(errorSummary)
     })
 
     it('should ignore a locale that is not allowed', async () => {
