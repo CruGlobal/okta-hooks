@@ -68,7 +68,7 @@ describe('registration hook', () => {
   describe('X-Cru-Locale header', () => {
     const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
 
-    it.each(['fr_FR', 'pt_BR'])('should add the allowed locale %s to the profile update', async (locale) => {
+    it.each(['fr_FR', 'pt_BR', 'de_DE', 'zh_TW'])('should add the allowed locale %s to the profile update', async (locale) => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
       const response = await handler(withLocale(locale) as any)
@@ -91,17 +91,24 @@ describe('registration hook', () => {
       expect(body.error.errorCauses[0].errorSummary).toBe(errorSummary)
     })
 
-    it('should ignore a locale that is not allowed', async () => {
+    it('should return the English error for an allowed locale with no translated error', async () => {
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
+      const response = await handler(withLocale('de_DE') as any)
+      expect(JSON.parse(response.body ?? '').error.errorCauses[0].errorSummary)
+        .toBe('help@checkmyokta.com must be contacted before this email domain can be used.')
+    })
+
+    it.each(['en_US', 'pt_PT', 'fr-FR', 'fr_fr', 'xx_XX'])('should ignore the locale %s, which is not allowed', async (locale) => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
-      const response = await handler(withLocale('de_DE') as any)
+      const response = await handler(withLocale(locale) as any)
       expect(JSON.parse(response.body ?? '').commands[0].value)
         .toStrictEqual({ theKeyGuid: '00000000-0000-0000-0000-000000000000', orca: false })
     })
 
     it('should keep the English error for a locale that is not allowed', async () => {
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
-      const response = await handler(withLocale('de_DE') as any)
+      const response = await handler(withLocale('xx_XX') as any)
       expect(JSON.parse(response.body ?? '').error.errorCauses[0].errorSummary)
         .toBe('help@checkmyokta.com must be contacted before this email domain can be used.')
     })
