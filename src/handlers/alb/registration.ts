@@ -10,12 +10,13 @@ import RegistrationRequest from '../../models/registration-request.js'
 import redactError from '../../utils/redact-error.js'
 
 // Locales a per-policy inline hook may send in its `X-Cru-Locale` header so Okta
-// sends the activation email in that language: one per non-English language Okta
+// sends the activation email in that language: each is in a non-English language Okta
 // translates emails into. Any other value, or no header, leaves the response unchanged.
 const ALLOWED_LOCALES = new Set([
-  'cs_CZ', 'da_DK', 'de_DE', 'el_GR', 'es_ES', 'fi_FI', 'fr_FR', 'ht_HT', 'hu_HU',
-  'id_ID', 'it_IT', 'ja_JP', 'ko_KR', 'ms_MY', 'nb_NO', 'nl_NL', 'pl_PL', 'pt_BR',
-  'ro_RO', 'ru_RU', 'sv_SE', 'th_TH', 'tr_TR', 'uk_UA', 'vi_VN', 'zh_CN', 'zh_TW'
+  'cs_CZ', 'da_DK', 'de_DE', 'el_GR', 'es_ES', 'es_MX', 'es_PR', 'fi_FI', 'fr_FR',
+  'ht_HT', 'hu_HU', 'id_ID', 'it_IT', 'ja_JP', 'ko_KR', 'ms_MY', 'nb_NO', 'nl_NL',
+  'pl_PL', 'pt_BR', 'ro_RO', 'ru_RU', 'sv_SE', 'th_TH', 'tr_TR', 'uk_UA', 'vi_VN',
+  'zh_CN', 'zh_TW'
 ])
 // Blocked-domain errors translated so far. An allowed locale without one gets English.
 const RESTRICTED_DOMAIN_ERRORS = new Map([

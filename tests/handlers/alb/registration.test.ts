@@ -68,7 +68,7 @@ describe('registration hook', () => {
   describe('X-Cru-Locale header', () => {
     const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
 
-    it.each(['fr_FR', 'pt_BR', 'de_DE', 'zh_TW'])('should add the allowed locale %s to the profile update', async (locale) => {
+    it.each(['fr_FR', 'pt_BR', 'de_DE', 'es_MX', 'zh_TW'])('should add the allowed locale %s to the profile update', async (locale) => {
       vi.spyOn(GUID, 'create').mockReturnValue('00000000-0000-0000-0000-000000000000')
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(false)
       const response = await handler(withLocale(locale) as any)
