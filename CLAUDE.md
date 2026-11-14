@@ -125,6 +125,35 @@ values landed correctly **in Okta**. If GR missed some, replay the migration
 manifest against GR directly. Flightdeck OKHOOKS-2 proposed a dead-letter queue
 for this and was **cancelled** — a one-off migration does not justify one.
 
+## Steady `create` errors mean a user is stuck in the missing group
+
+`sync_missing_users` runs every 30 minutes. It sends a synthetic
+`user.lifecycle.create` event for every member of the Okta group
+`Global_Registry:Users:missing`. Group rules fill that group with users who are
+missing `theKeyGuid`, `thekeyGrPersonId` or `grMasterPersonId`. When `create`
+fails, Lambda tries the event 3 times (`retry_attempts = 2` in Terraform) and
+then drops it. There is no DLQ. The user stays in the group, so the same thing
+happens every cycle, forever.
+
+So **each stuck user adds exactly 3 errors per 30 minutes (144 a day)**. A flat
+daily error count that is a multiple of 144 means that many stuck users. To find
+them, list the group's members, then match them to the
+`@options.body.entity.person.client_integration_id` or Okta user ID in the error
+logs. `aws.lambda.async_events_dropped` shows 48 a day per stuck user. Fix the
+user's data, and the user leaves the group on its own.
+
+Resolved 2026-11 (Flightdeck OKHOOKS-6):
+- Prod: one user got Okta `500 E0000009` on every attempt until an Okta admin
+  deactivated the account.
+- Stage: 5 Okta Preview test accounts were deleted. These were the `@xxcru.com`
+  copies left by the us-onboarding e2e setup, whose `usEmployeeId` collided with
+  the paired `@cru.org` accounts, plus 2 STAGED accounts that GR returned 404 for.
+- Prod had 1 to 4 users stuck like this for most of 2026 before anyone noticed.
+
+Okta admin changes made with this app's own `OKTA_CLIENT_TOKEN` do not trigger
+okta-hooks. The token's actor is in `OKTA_ACTOR_ID_BLOCK_LIST`, so `events.ts`
+drops those events and no GR writes happen.
+
 ## Code Conventions
 
 - TypeScript with ES modules (`import`/`export`)
