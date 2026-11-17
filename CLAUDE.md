@@ -147,8 +147,15 @@ This app runs on Cru's build-once / promote pipeline (pipeline v2):
   container image from the default branch — nightly at 05:00 UTC and on manual
   dispatch. Builds do **not** run on push/merge.
 - Each build produces a candidate that is deployed to the release-candidate
-  surface automatically. Promotion to production is a separate, manual step run
-  from `cru-deploy`; production moves only on a promote, never on merge.
+  surface automatically. The deploy job starts that deploy through the deploy
+  gate with the run's GitHub OIDC token; it has no org token, so if the gate
+  refuses or can't be reached, the deploy fails.
+- Promotion to production is a separate, manual step that runs in
+  `cru-deploy`, started with `cru app promote -n okta-hooks` (and
+  `cru app rollback -n okta-hooks <release>` to go back). The CLI signs you in
+  with Okta and sends the request through the deploy gate, which allows it only
+  for the developers listed in this app's Terraform; push access to this repo
+  does not count. Production moves only on a promote, never on merge.
 - The image is environment-agnostic: `PROJECT_NAME` and `ENVIRONMENT` are
   injected as function environment variables at runtime, so the same image bytes
   run in every environment. `DD_VERSION` is the only build-baked identity value.
