@@ -1,0 +1,63 @@
+name: dependabot-auto-merge
+
+# Approves and turns on squash auto-merge for Dependabot patch and minor bumps,
+# security fixes included. Majors wait for a person; a grouped PR reports its
+# highest bump, so a group holding a major waits too.
+#
+# Auto-merge is only safe because the default-branch ruleset requires the
+# `test` and `Validate PR Title` checks (cru-terraform
+# applications/okta-hooks/github.tf, `required_checks`). Without them a
+# Dependabot PR is already mergeable, and `gh pr merge --auto` merges it at once.
+#
+# Differs from the fleet template (cru-app-template) on purpose: no
+# security-advisory arm. fetch-metadata fills `alert-state` only when
+# `alert-lookup: true` is set, which the template never does, so that arm
+# never fired. A security fix that is a major bump waits for a person here.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Evaluate eligibility
+        id: gate
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+        run: |
+          if [ "$UPDATE_TYPE" = "version-update:semver-patch" ] \
+             || [ "$UPDATE_TYPE" = "version-update:semver-minor" ]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "update-type=$UPDATE_TYPE"
+
+      - name: Approve PR
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Runs as github-actions[bot], not dependabot[bot], so it counts under
+        # a no-self-approval rule if the ruleset ever requires a review.
+        run: gh pr review --approve "$PR_URL"
+
+      - name: Enable squash auto-merge
+        if: ${{ steps.gate.outputs.eligible == 'true' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --squash --auto "$PR_URL"
