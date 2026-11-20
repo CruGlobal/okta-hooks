@@ -8,9 +8,9 @@ vi.mock('@/config/rollbar.js')
 
 const mockSyncDomainsFromGoogle = vi.fn()
 vi.mock('@/models/restricted-domains.js', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    syncDomainsFromGoogle: mockSyncDomainsFromGoogle
-  }))
+  default: vi.fn().mockImplementation(function () {
+    return { syncDomainsFromGoogle: mockSyncDomainsFromGoogle }
+  })
 }))
 
 describe('sync-restricted-domains handler', () => {

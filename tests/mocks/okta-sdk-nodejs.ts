@@ -24,14 +24,16 @@ export const mockListGroupUsers = vi.fn(() => ({
   each: (fn: (user: MockUser) => boolean | void) => forEach(values.users, fn)
 }))
 
-export const Client = vi.fn().mockImplementation(() => ({
-  userApi: {
-    getUser: mockGetUser,
-    updateUser: mockUpdateUser,
-    listUsers: mockListUsers
-  },
-  groupApi: {
-    listGroupUsers: mockListGroupUsers,
-    unassignUserFromGroup: mockUnassignUserFromGroup
+export const Client = vi.fn().mockImplementation(function () {
+  return {
+    userApi: {
+      getUser: mockGetUser,
+      updateUser: mockUpdateUser,
+      listUsers: mockListUsers
+    },
+    groupApi: {
+      listGroupUsers: mockListGroupUsers,
+      unassignUserFromGroup: mockUnassignUserFromGroup
+    }
   }
-}))
+})

@@ -2,9 +2,9 @@ import { vi } from 'vitest'
 
 // SNS Client mock
 export const mockSNSSend = vi.fn()
-export const SNSClient = vi.fn().mockImplementation(() => ({
-  send: mockSNSSend
-}))
+export const SNSClient = vi.fn().mockImplementation(function () {
+  return { send: mockSNSSend }
+})
 
 // DynamoDB DocumentClient mock
 export const mockDynamoDBSend = vi.fn()
@@ -16,6 +16,6 @@ export const DynamoDBDocumentClient = {
 }
 
 // Command mocks (these are just markers to identify which command was called)
-export const PublishCommand = vi.fn().mockImplementation((input) => ({ _type: 'PublishCommand', input }))
-export const ScanCommand = vi.fn().mockImplementation((input) => ({ _type: 'ScanCommand', input }))
-export const BatchWriteCommand = vi.fn().mockImplementation((input) => ({ _type: 'BatchWriteCommand', input }))
+export const PublishCommand = vi.fn().mockImplementation(function (input) { return { _type: 'PublishCommand', input } })
+export const ScanCommand = vi.fn().mockImplementation(function (input) { return { _type: 'ScanCommand', input } })
+export const BatchWriteCommand = vi.fn().mockImplementation(function (input) { return { _type: 'BatchWriteCommand', input } })
