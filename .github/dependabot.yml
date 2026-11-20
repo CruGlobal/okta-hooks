@@ -1,10 +1,44 @@
 version: 2
+
+# Groups take minor + patch only. A grouped PR reports its highest bump, so one
+# major in a group would hold every minor and patch in it back from auto-merge.
+#
+# Every commit-message prefix must be in conventional-commits.yml's allowed
+# types, or Validate PR Title fails and the PR can never merge.
+
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
     groups:
-      dependabot:
+      npm-dependencies:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    ignore:
+      # A bump to the `uses:` tag alone would leave pipeline-v2.yml's
+      # `workflow-ref` input pointing at the old version.
+      - dependency-name: "CruGlobal/.github*"
