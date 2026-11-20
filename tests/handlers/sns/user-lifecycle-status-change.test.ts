@@ -11,10 +11,12 @@ const mockDeleteProfile = vi.fn()
 
 vi.mock('@/config/rollbar.js')
 vi.mock('@/models/global-registry.js', () => ({
-  default: vi.fn(() => ({
-    createOrUpdateProfile: mockCreateOrUpdateProfile,
-    deleteProfile: mockDeleteProfile.mockResolvedValue(true)
-  }))
+  default: vi.fn(function () {
+    return {
+      createOrUpdateProfile: mockCreateOrUpdateProfile,
+      deleteProfile: mockDeleteProfile.mockResolvedValue(true)
+    }
+  })
 }))
 vi.mock('@okta/okta-sdk-nodejs', async () => {
   const mock = await import('../../mocks/okta-sdk-nodejs.js')

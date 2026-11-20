@@ -5,11 +5,13 @@ export const mockEntityDELETE = vi.fn()
 export const mockEntityPOST = vi.fn()
 export const mockEntityPUT = vi.fn()
 
-export const GRClient = vi.fn().mockImplementation(() => ({
-  Entity: {
-    get: mockEntityGET,
-    delete: mockEntityDELETE,
-    post: mockEntityPOST,
-    put: mockEntityPUT
+export const GRClient = vi.fn().mockImplementation(function () {
+  return {
+    Entity: {
+      get: mockEntityGET,
+      delete: mockEntityDELETE,
+      post: mockEntityPOST,
+      put: mockEntityPUT
+    }
   }
-}))
+})

@@ -10,9 +10,9 @@ const mockCreateOrUpdateProfile = vi.fn()
 
 vi.mock('@/config/rollbar.js')
 vi.mock('@/models/global-registry.js', () => ({
-  default: vi.fn(() => ({
-    createOrUpdateProfile: mockCreateOrUpdateProfile
-  }))
+  default: vi.fn(function () {
+    return { createOrUpdateProfile: mockCreateOrUpdateProfile }
+  })
 }))
 vi.mock('@okta/okta-sdk-nodejs', async () => {
   const mock = await import('../../mocks/okta-sdk-nodejs.js')

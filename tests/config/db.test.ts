@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockOn = vi.fn()
-const MockPool = vi.fn().mockImplementation(() => ({ on: mockOn }))
+const MockPool = vi.fn().mockImplementation(function () { return { on: mockOn } })
 
 vi.mock('pg', () => ({
   default: { Pool: MockPool }
