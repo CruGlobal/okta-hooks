@@ -146,8 +146,9 @@ class RestrictedDomains {
   }
 
   // Makes the table match MMD, writing only the difference. Writes nothing and
-  // throws when MMD fails, returns no domains, or the run would delete more than
-  // the shrink limit (unless allowLargeDelete). Fails the run if a write is left
+  // throws when MMD fails or returns no domains. When the run would delete more
+  // than the shrink limit (and allowLargeDelete is not set), it writes the adds,
+  // skips every delete, then throws. Fails the run if a write is left
   // unprocessed.
   async syncDomainsFromMmd(
     { allowLargeDelete = false }: { allowLargeDelete?: boolean } = {}
@@ -163,20 +164,25 @@ class RestrictedDomains {
     const added = difference(mmdDomains, currentDomains)
     const removed = difference(currentDomains, mmdDomains)
     const deleteLimit = Math.max(Math.ceil((currentDomains.length * MAX_DELETE_PERCENT) / 100), MIN_DELETE_LIMIT)
-    if (removed.length > deleteLimit && !allowLargeDelete) {
-      throw new RestrictedDomainsSyncError(
-        `Restricted domains refresh refused by the shrink guard: it would delete ${removed.length} of ${currentDomains.length} domains, over the limit of ${deleteLimit}. Nothing was written. To allow it, invoke the job once with {"allowLargeDelete": true}.`
-      )
-    }
+    // Adds only grow the restricted set, so they are safe to apply even when the
+    // shrink guard holds back the deletes.
+    const shrinkGuardTripped = removed.length > deleteLimit && !allowLargeDelete
 
-    // Puts go first, so a run that fails part way has removed nothing until every
-    // new domain is in.
+    // added and removed never share a domain, so write order is not a safety
+    // property. On a shrink trip only the puts run. A run that fails part way
+    // leaves its remaining adds and removes for the next run.
     const requests = [
       ...added.map((domain) => dynamoDbRequest('put', domain)),
-      ...removed.map((domain) => dynamoDbRequest('delete', domain))
+      ...(shrinkGuardTripped ? [] : removed.map((domain) => dynamoDbRequest('delete', domain)))
     ]
     for (const batch of chunk(requests, BATCH_WRITE_SIZE)) {
       await batchWrite(batch)
+    }
+
+    if (shrinkGuardTripped) {
+      throw new RestrictedDomainsSyncError(
+        `Restricted domains refresh stopped by the shrink guard: it would delete ${removed.length} of ${currentDomains.length} domains, over the limit of ${deleteLimit}. Applied ${added.length} adds and skipped all ${removed.length} deletes. To apply the deletes, invoke the job once with {"allowLargeDelete": true}.`
+      )
     }
     return { added: added.length, removed: removed.length }
   }

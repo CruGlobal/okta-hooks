@@ -305,23 +305,51 @@ describe('RestrictedDomains', () => {
         await expect(sync({ allowLargeDelete: true })).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
       })
+    })
 
-      it('refuses to delete more than 10% of a large table (2,165 rows, 300 deletes, limit 217)', async () => {
+    // A shrink trip still applies the adds: they only grow the restricted set.
+    // It skips every delete and fails the run so a person looks.
+    describe('shrink guard (adds only, then throw)', () => {
+      it('writes the adds, sends no deletes, and rejects (2,165 rows, 300 deletes, limit 217)', async () => {
+        const table = domains(2165)
+        mockMmd([...table.slice(300), 'new-a.org', 'new-b.org'])
+        mockTable([table])
+        const run = sync()
+        await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        await expect(run).rejects.toThrow(
+          /shrink guard.*300 of 2165.*limit of 217.*Applied 2 adds.*skipped all 300 deletes.*allowLargeDelete/
+        )
+        expect(batchWrites().flat()).toEqual([put('new-a.org'), put('new-b.org')])
+      })
+
+      it('writes nothing and rejects when there are no adds (2,165 rows, 300 deletes, limit 217)', async () => {
         const table = domains(2165)
         mockMmd(table.slice(300))
         mockTable([table])
         const run = sync()
         await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
-        await expect(run).rejects.toThrow(/shrink guard.*300 of 2165.*limit of 217.*allowLargeDelete/)
+        await expect(run).rejects.toThrow(/shrink guard.*300 of 2165.*limit of 217.*Applied 0 adds.*skipped all 300 deletes.*allowLargeDelete/)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
       })
 
-      it('writes the same large delete when the event sets allowLargeDelete', async () => {
+      it('rejects with the write error, not the guard error, when the adds fail', async () => {
         const table = domains(2165)
-        mockMmd(table.slice(300))
+        mockMmd([...table.slice(300), 'new-a.org'])
+        mockTable([table], () => {
+          throw new Error('ProvisionedThroughputExceededException')
+        })
+        const run = sync()
+        await expect(run).rejects.toThrow('ProvisionedThroughputExceededException')
+        await expect(run).rejects.not.toBeInstanceOf(RestrictedDomainsSyncError)
+        expect(batchWrites().flat()).toEqual([put('new-a.org')])
+      })
+
+      it('writes the adds and the large delete when the event sets allowLargeDelete', async () => {
+        const table = domains(2165)
+        mockMmd([...table.slice(300), 'new-a.org'])
         mockTable([table])
-        await expect(sync({ allowLargeDelete: true })).resolves.toEqual({ added: 0, removed: 300 })
-        expect(batchWrites().flat()).toEqual(table.slice(0, 300).map(del))
+        await expect(sync({ allowLargeDelete: true })).resolves.toEqual({ added: 1, removed: 300 })
+        expect(batchWrites().flat()).toEqual([put('new-a.org'), ...table.slice(0, 300).map(del)])
       })
 
       it('allows exactly the limit (2,165 rows, 217 deletes)', async () => {
