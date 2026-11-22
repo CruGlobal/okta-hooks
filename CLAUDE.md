@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider registration and event processing. Integrates with Okta, AWS (SNS), MMD Postgres, and CruGlobal's Global Registry.
+Cru Okta Web-hooks: AWS Lambda functions that handle Okta identity provider registration and event processing. Integrates with Okta, AWS (SNS, DynamoDB), MMD Postgres, and CruGlobal's Global Registry.
 
 ## Common Commands
 
@@ -27,7 +27,7 @@ npm run test tests/path/to/file.test.ts
 **Lambda Handlers** (`src/handlers/`):
 
 1. **ALB Handlers** (`alb/`) - Triggered via Application Load Balancer from Okta hooks
-   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (looked up in MMD Postgres)
+   - `registration.ts` - Inline hook: validates registrations, generates GUIDs, blocks restricted email domains (looked up in a DynamoDB copy of MMD's list). Always answers with an explicit ALLOW or DENY; see "Registration hook and restricted domains" below
    - `verification.ts` - Verification endpoint for Okta hook setup
    - `events.ts` - Event hook: routes Okta events to SNS topic
 
@@ -38,13 +38,45 @@ npm run test tests/path/to/file.test.ts
 
 3. **Scheduled Handlers** (`schedule/`)
    - `sync-missing-okta-users.ts` - Re-syncs users missing Global Registry IDs (every 30 minutes)
-   - `sync-restricted-domains.ts` - Syncs restricted domains from the IDM Google Sheet into DynamoDB (every 3 hours)
+   - `sync-restricted-domains.ts` - Refreshes the DynamoDB copy of restricted domains from MMD Postgres (every 15 minutes), with guards against emptying it
 
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - Looks up blocked email domains in MMD Postgres (`Domains.is_idm_self_service_prevention`), the only source for blocking. The Google Sheet -> DynamoDB sync (`sync-restricted-domains.ts`) still runs, but nothing reads the table for blocking; removing its infrastructure is a separate cru-terraform change. The `restricted_domains_postgres` feature flag that used to pick the source was retired 2026-10-02. Checking it called the pipeline v2 flag service on every sign-up, which often timed out and pushed the inline hook past Okta's 3s limit. The flag is left in place in the flag service, because `cru app flags rm` burns the name forever.
+- `RestrictedDomains` - Blocked email domains. MMD Postgres (`Domains.is_idm_self_service_prevention`) is the source of truth. The DynamoDB table in `DYNAMODB_RESTRICTED_DOMAINS` is a copy, so a domain newly restricted in MMD takes up to 15 minutes to block sign-ups.
+  - `isRestricted(email)` (registration hook) does one DynamoDB `GetItem` on the lowercased domain. Exact match only, no subdomain or parent matching; an address with no domain is not restricted. It never calls MMD, so an MMD outage cannot change a sign-up decision. Its client gives up fast (600 ms per attempt, 2 attempts), and it throws on any DynamoDB error.
+  - `syncDomainsFromMmd()` (scheduled job) reads MMD, scans the table, and writes only the difference in `BatchWrite` chunks of 25, retrying `UnprocessedItems`. It writes nothing and throws when the MMD query fails, MMD returns zero domains, or the run would delete more than `max(ceil(10% of the table), 100)` rows. A deliberate large removal is one manual invoke with the event `{"allowLargeDelete": true}`. The refresh has its own DynamoDB client with the SDK's default retries and timeouts, so one throttle or slow Scan page does not fail the run.
+  - The job passes the MMD pool to the constructor. The model never imports `src/config/db.ts`, so the registration bundle carries no `pg`.
+  - History (Flightdeck OKHOOKS-7): the refresh from MMD replaced a Google Sheet feed into the same table, and before this design the hook queried MMD during each sign-up. The `restricted_domains_postgres` feature flag that once picked the source was retired 2026-10-02: checking it called the pipeline v2 flag service on every sign-up, which often timed out and pushed the hook past Okta's 3 s limit. The flag is left in the flag service, because `cru app flags rm` burns the name forever.
 - `GlobalRegistry` - CruGlobal registry client wrapper
+
+## Registration hook and restricted domains
+
+Okta waits at most 3 s for the registration inline hook and retries once. Then it
+refuses the sign-up with its own generic error
+(https://developer.okta.com/docs/concepts/inline-hooks/). So:
+
+- The hook always answers HTTP 200 with an explicit `com.okta.action.update`
+  ALLOW or DENY. It never returns 204. Okta does not document what an empty
+  response means, and the old 204 error path let sign-ups through unchecked.
+- Any error (DynamoDB unreachable, throttled or timed out, a missing table, or
+  any other throw) is a DENY with reason `RESTRICTED_DOMAIN_CHECK_UNAVAILABLE`
+  and a "please try again in a few minutes" message in English, fr_FR or pt_BR.
+  It never fails open.
+- The hook answers in about 2 s in every path. The lookup times out after
+  1.5 s and the Rollbar report gets at most 0.5 s.
+- Each failure logs one line,
+  `{"event":"restricted_domain_check_failed","name":...,"error":...}`, with
+  credentials redacted. The hook still returns 200, so the Lambda error metric
+  never sees these. A Datadog log monitor on that event (cru-terraform
+  `applications/okta-hooks`) is the alert.
+
+**Rollout: the first refresh may refuse.** Before the MMD refresh, the table held
+the Google Sheet's rows. If the Sheet and MMD differ by more than the shrink
+limit, the first refresh fails with the shrink guard error and writes nothing,
+and so does every run after it. Compare the table with MMD, then invoke
+`sync_restricted_domains` once with the event `{"allowLargeDelete": true}`.
+Scheduled runs work on their own after that.
 
 ## Global Registry access is scoped by credential
 
