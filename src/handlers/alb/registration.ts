@@ -34,9 +34,10 @@ const DEFAULT_CHECK_UNAVAILABLE_ERROR = "We couldn't finish creating your accoun
 
 // Okta waits at most 3 s for this hook, then refuses the sign-up with its own generic
 // error. The lookup gets 1.5 s and the Rollbar report at most 0.5 s, so the hook
-// answers in about 2 s even when DynamoDB and Rollbar both hang.
-const CHECK_TIMEOUT_MS = 1500
-const ROLLBAR_WAIT_MS = 500
+// answers in about 2 s even when DynamoDB and Rollbar both hang. Exported for the
+// time budget tests.
+export const CHECK_TIMEOUT_MS = 1500
+export const ROLLBAR_WAIT_MS = 500
 
 const allowedLocale = (requestedLocale: string | undefined): string | undefined =>
   requestedLocale && ALLOWED_LOCALES.has(requestedLocale) ? requestedLocale : undefined
@@ -71,6 +72,7 @@ const waitAtMost = async (promise: Promise<unknown>, ms: number): Promise<void> 
 }
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+const errorName = (error: unknown): string | undefined => (error instanceof Error ? error.name : undefined)
 
 const checkUnavailableResponse = (locale: string | undefined): ALBResult => {
   const response = new HookResponse()
@@ -108,10 +110,15 @@ export const handler = async (lambdaEvent: ALBEvent): Promise<ALBResult> => {
     return response.toALBResponse()
   } catch (error) {
     // Any failure refuses the sign-up with a "try again" error rather than let it
-    // through unchecked. The log line feeds the Datadog monitor. Credentials are
-    // stripped first, before the log line or Rollbar serialises the error.
+    // through unchecked. The log line feeds the Datadog monitor, and the error name
+    // (an AWS SDK exception name, for example) tells the failures apart. Credentials
+    // are stripped first, before the log line or Rollbar serialises the error.
     const redacted = redactError(error)
-    console.error(JSON.stringify({ event: 'restricted_domain_check_failed', error: errorMessage(redacted) }))
+    console.error(JSON.stringify({
+      event: 'restricted_domain_check_failed',
+      name: errorName(redacted),
+      error: errorMessage(redacted)
+    }))
     // The Rollbar wrapper resolves only on Rollbar's callback, which may never come.
     await waitAtMost(rollbar.error('registration hook Error', redacted as Error, { lambdaEvent }), ROLLBAR_WAIT_MS)
     return checkUnavailableResponse(allowedLocale(lambdaEvent?.headers?.['x-cru-locale']))

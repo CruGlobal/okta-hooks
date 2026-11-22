@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ALBResult } from 'aws-lambda'
-import { handler } from '@/handlers/alb/registration.js'
+import { handler, CHECK_TIMEOUT_MS, ROLLBAR_WAIT_MS } from '@/handlers/alb/registration.js'
 import GUID from '@/models/guid.js'
 import rollbar from '@/config/rollbar.js'
 import RestrictedDomains from '@/models/restricted-domains.js'
@@ -244,7 +244,8 @@ describe('registration hook', () => {
 
       expect(console.error).toHaveBeenCalledTimes(1)
       const line = vi.mocked(console.error).mock.calls[0][0] as string
-      expect(JSON.parse(line)).toStrictEqual({ event: 'restricted_domain_check_failed', error: 'GetItem failed' })
+      expect(JSON.parse(line))
+        .toStrictEqual({ event: 'restricted_domain_check_failed', name: 'Error', error: 'GetItem failed' })
       expect(line).not.toContain('secret')
 
       const reported = vi.mocked(rollbar.error).mock.calls[0][1] as unknown as typeof error
@@ -253,18 +254,43 @@ describe('registration hook', () => {
       expect(reported.$response.headers.authorization).toBe(REDACTED)
     })
 
+    it('should log the error name, which tells throttling from a timeout or a missing table', async () => {
+      const error = Object.assign(new Error('Rate of requests exceeds the allowed throughput.'), {
+        name: 'ProvisionedThroughputExceededException'
+      })
+      vi.spyOn(RestrictedDomains, 'isRestricted').mockRejectedValue(error)
+      await handler(registrationEvent as any)
+      expect(JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string)).toStrictEqual({
+        event: 'restricted_domain_check_failed',
+        name: 'ProvisionedThroughputExceededException',
+        error: 'Rate of requests exceeds the allowed throughput.'
+      })
+    })
+
     it('should log a thrown value that is not an Error', async () => {
       vi.spyOn(RestrictedDomains, 'isRestricted').mockRejectedValue('boom')
       const response = await handler(registrationEvent as any)
       expect(bodyOf(response)).toStrictEqual(tryAgainBody())
+      // It has no name, so JSON.stringify leaves the key out.
       expect(JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string))
         .toStrictEqual({ event: 'restricted_domain_check_failed', error: 'boom' })
     })
   })
 
   describe('time budget', () => {
+    // Okta waits 3 s for the hook. Answering in under 2.5 s leaves room for a cold
+    // start and the network.
+    const HOOK_BUDGET_MS = 2500
+    // The longest the handler can take: the lookup times out, then the Rollbar
+    // report is cut off.
+    const WORST_CASE_MS = CHECK_TIMEOUT_MS + ROLLBAR_WAIT_MS
+
     beforeEach(() => {
       vi.useFakeTimers()
+    })
+
+    it('should keep the lookup timeout plus the Rollbar wait under the 2.5 s budget', () => {
+      expect(WORST_CASE_MS).toBeLessThan(HOOK_BUDGET_MS)
     })
 
     it('should answer within 1,000 ms of a failure when Rollbar never calls back', async () => {
@@ -276,11 +302,13 @@ describe('registration hook', () => {
       expect(bodyOf(await result)).toStrictEqual(tryAgainBody())
     })
 
-    it('should answer within 2,000 ms when the lookup and Rollbar both hang', async () => {
+    it('should answer by the lookup timeout plus the Rollbar wait when both hang', async () => {
       vi.spyOn(RestrictedDomains, 'isRestricted').mockReturnValue(never())
       vi.mocked(rollbar.error).mockReturnValue(never())
       const { state, result } = startHandler(registrationEvent)
-      await vi.advanceTimersByTimeAsync(2000)
+      await vi.advanceTimersByTimeAsync(WORST_CASE_MS - 1)
+      expect(state.settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
       expect(state.settled).toBe(true)
       const response = await result
       expect(response.statusCode).toBe(200)
@@ -291,11 +319,12 @@ describe('registration hook', () => {
     })
 
     it('should still decide when a slow lookup answers inside the timeout', async () => {
+      const answerAfterMs = CHECK_TIMEOUT_MS - 100
       vi.spyOn(GUID, 'create').mockReturnValue(GUID_VALUE)
       vi.spyOn(RestrictedDomains, 'isRestricted')
-        .mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(false), 1400)))
+        .mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(false), answerAfterMs)))
       const { result } = startHandler(registrationEvent)
-      await vi.advanceTimersByTimeAsync(1400)
+      await vi.advanceTimersByTimeAsync(answerAfterMs)
       expect(bodyOf(await result).commands[0]).toStrictEqual(ALLOW)
       expect(console.error).not.toHaveBeenCalled()
     })
