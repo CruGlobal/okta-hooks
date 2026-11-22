@@ -14,12 +14,12 @@ describe('db pool config', () => {
     mockOn.mockClear()
   })
 
-  it('configures connection and query timeouts', async () => {
+  it('gives the scheduled refresh generous connection and query timeouts', async () => {
     await import('@/config/db.js')
     expect(MockPool).toHaveBeenCalledWith(
       expect.objectContaining({
-        connectionTimeoutMillis: 2000,
-        query_timeout: 2000
+        connectionTimeoutMillis: 10000,
+        query_timeout: 30000
       })
     )
   })
