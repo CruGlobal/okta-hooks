@@ -17,7 +17,7 @@
 - Domain match: lowercase the parsed email domain, exact `GetItem` on `DomainName`. No subdomain or parent matching.
 - MMD query, verbatim: `SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true`. Drop null or empty values.
 - BatchWrite chunks of 25. Retry `UnprocessedItems`; fail the run if any remain.
-- Refresh guards write nothing and throw: MMD error; zero rows; deletes > `max(ceil(0.10 * currentCount), 100)` unless the event has `allowLargeDelete: true`.
+- Refresh guards write nothing and throw: MMD error; zero rows; deletes > `max(ceil(0.10 * currentCount), 100)` unless the event has `allowLargeDelete: true`. (Changed after the final review: a shrink-guard trip now writes the adds, skips the deletes, then throws. See the spec's Guards section.)
 - New error reason `RESTRICTED_DOMAIN_CHECK_UNAVAILABLE`, location `data.userProfile.login`. English text: `We couldn't finish creating your account. Please try again in a few minutes.` Translated for fr_FR and pt_BR (drafts below, flagged for native review); other locales get English.
 - Structured log line on every check failure: `console.error(JSON.stringify({ event: 'restricted_domain_check_failed', error: <redacted message> }))`. The Datadog monitor keys on `restricted_domain_check_failed`.
 - Env var for the table: `DYNAMODB_RESTRICTED_DOMAINS` (already set on `registration` and `sync_restricted_domains`).
@@ -62,7 +62,7 @@
   - `UnprocessedItems` on the first attempt are resent; if still present after the retries, rejects.
   - Pool query rejects: rejects, no `BatchWriteCommand` sent.
   - MMD returns 0 rows: rejects with `RestrictedDomainsSyncError`, nothing written.
-  - Table 2,165 rows, run would delete 300 (limit is max(217, 100) = 217): rejects with `RestrictedDomainsSyncError`, nothing written. Same input with `{ allowLargeDelete: true }` writes.
+  - Table 2,165 rows, run would delete 300 (limit is max(217, 100) = 217): rejects with `RestrictedDomainsSyncError`, nothing written (later changed: adds written, deletes skipped). Same input with `{ allowLargeDelete: true }` writes.
   - Table 2,165 rows, run would delete 217: allowed.
   - Table 150 rows, run would delete 100: allowed (limit 100). Deletes 101: rejected.
   - `Scan` is paginated with `LastEvaluatedKey` until exhausted.
