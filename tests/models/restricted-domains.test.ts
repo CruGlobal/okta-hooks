@@ -1,20 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import RestrictedDomains from '@/models/restricted-domains.js'
-import pool from '@/config/db.js'
-import {
-  auth,
-  sheets,
-  mockSpreadsheetsGet
-} from '../mocks/googleapis-sheets.js'
+import RestrictedDomains, { RestrictedDomainsSyncError } from '@/models/restricted-domains.js'
 import {
   mockDynamoDBSend,
+  DynamoDBClient,
+  GetCommand,
   ScanCommand,
   BatchWriteCommand
 } from '../mocks/aws-sdk-v3.js'
 
-vi.mock('@/config/db.js', () => ({
-  default: { query: vi.fn() }
-}))
+// The registration bundle must not carry pg, so the model must never load the
+// MMD pool module. The job hands the pool in through the constructor.
+const mmd = vi.hoisted(() => ({ poolModuleLoaded: false, query: vi.fn() }))
+
+vi.mock('@/config/db.js', () => {
+  mmd.poolModuleLoaded = true
+  return { default: { query: mmd.query } }
+})
 
 vi.mock('@aws-sdk/client-dynamodb', async () => {
   const mock = await import('../mocks/aws-sdk-v3.js')
@@ -25,21 +26,71 @@ vi.mock('@aws-sdk/lib-dynamodb', async () => {
   const mock = await import('../mocks/aws-sdk-v3.js')
   return {
     DynamoDBDocumentClient: mock.DynamoDBDocumentClient,
+    GetCommand: mock.GetCommand,
     ScanCommand: mock.ScanCommand,
     BatchWriteCommand: mock.BatchWriteCommand
   }
 })
 
-vi.mock('@googleapis/sheets', async () => {
-  const sheetsMock = await import('../mocks/googleapis-sheets.js')
-  return { auth: sheetsMock.auth, sheets: sheetsMock.sheets }
-})
+// The client is built once at module scope. Capture its config before
+// beforeEach clears the mock's call history.
+const dynamoDbClientConfig = vi.mocked(DynamoDBClient).mock.calls[0]?.[0]
 
-const mockQuery = vi.mocked(pool.query)
+const TABLE = 'restricted_domains_dynamodb'
+const MMD_QUERY = 'SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
+
+const put = (domain: string) => ({ PutRequest: { Item: { DomainName: domain } } })
+const del = (domain: string) => ({ DeleteRequest: { Key: { DomainName: domain } } })
+const domains = (count: number, prefix = 'filler') =>
+  Array.from({ length: count }, (_, i) => `${prefix}-${i}.org`)
+
+type BatchWriteInput = { RequestItems: Record<string, unknown[]> }
+type BatchWriteReply = (input: BatchWriteInput) => unknown
+
+const mockMmd = (rows: (string | null)[]) =>
+  mmd.query.mockResolvedValue({ rows: rows.map((domain) => ({ domain })) })
+
+// Routes DocumentClient.send by command. scanPages are the table's contents,
+// one array per Scan page; every page but the last carries a LastEvaluatedKey.
+const mockTable = (scanPages: string[][], batchWriteReply: BatchWriteReply = () => ({})) => {
+  let page = 0
+  mockDynamoDBSend.mockImplementation(async (command: { _type: string, input: unknown }) => {
+    switch (command._type) {
+      case 'ScanCommand': {
+        const current = page++
+        return {
+          Items: scanPages[current].map((DomainName) => ({ DomainName })),
+          LastEvaluatedKey: current < scanPages.length - 1 ? { DomainName: scanPages[current].at(-1) } : undefined
+        }
+      }
+      case 'BatchWriteCommand':
+        return batchWriteReply(command.input as BatchWriteInput)
+      default:
+        throw new Error(`unexpected command ${command._type}`)
+    }
+  })
+}
+
+const batchWrites = () =>
+  vi.mocked(BatchWriteCommand).mock.calls.map(([input]) => (input as BatchWriteInput).RequestItems[TABLE])
+
+const sync = (options?: { allowLargeDelete?: boolean }) =>
+  new RestrictedDomains({ query: mmd.query } as never).syncDomainsFromMmd(options)
 
 describe('RestrictedDomains', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockDynamoDBSend.mockReset()
+    mmd.query.mockReset()
+  })
+
+  describe('DynamoDB client', () => {
+    it('gives up on a hung request instead of waiting', () => {
+      expect(dynamoDbClientConfig).toEqual({
+        maxAttempts: 2,
+        requestHandler: { connectionTimeout: 500, requestTimeout: 600, throwOnRequestTimeout: true }
+      })
+    })
   })
 
   describe('static isRestricted(emailAddress)', () => {
@@ -57,125 +108,218 @@ describe('RestrictedDomains', () => {
       mockFetch.mockRestore()
     })
 
-    it('is true when the domain is flagged in MMD Postgres', async () => {
-      mockQuery.mockResolvedValue({ rowCount: 1, rows: [{ '?column?': 1 }] } as never)
-      const result = await RestrictedDomains.isRestricted('tony.stark@Avengers.org')
+    it('is true when the lowercased domain is in the table', async () => {
+      mockDynamoDBSend.mockResolvedValue({ Item: { DomainName: 'blocked.org' } })
+      const result = await RestrictedDomains.isRestricted('a@Blocked.ORG')
       expect(result).toBe(true)
-      expect(mockQuery).toHaveBeenCalledWith(
-        'SELECT 1 FROM "Domains" WHERE lower(domain) = $1 AND is_idm_self_service_prevention = true LIMIT 1',
-        ['avengers.org']
-      )
+      expect(GetCommand).toHaveBeenCalledWith({ TableName: TABLE, Key: { DomainName: 'blocked.org' } })
+      expect(mockDynamoDBSend).toHaveBeenCalledTimes(1)
     })
 
-    it('is false when the domain is not flagged in MMD Postgres', async () => {
-      mockQuery.mockResolvedValue({ rowCount: 0, rows: [] } as never)
-      const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
-      expect(result).toBe(false)
-      expect(mockQuery).toHaveBeenCalledTimes(1)
-    })
-
-    it('treats a null rowCount as not restricted', async () => {
-      mockQuery.mockResolvedValue({ rowCount: null, rows: [] } as never)
-      const result = await RestrictedDomains.isRestricted('tony.stark@avengers.org')
+    it('is false when the domain is not in the table', async () => {
+      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
+      const result = await RestrictedDomains.isRestricted('a@open.org')
       expect(result).toBe(false)
     })
 
-    it('never reads the DynamoDB table or calls the flag service', async () => {
-      mockQuery.mockResolvedValue({ rowCount: 0, rows: [] } as never)
-      await RestrictedDomains.isRestricted('tony.stark@avengers.org')
+    it('is false for an invalid email address without reading DynamoDB', async () => {
+      const result = await RestrictedDomains.isRestricted('not-an-email')
+      expect(result).toBe(false)
       expect(mockDynamoDBSend).not.toHaveBeenCalled()
+    })
+
+    it('propagates DynamoDB errors (the registration hook denies)', async () => {
+      mockDynamoDBSend.mockRejectedValue(new Error('ProvisionedThroughputExceededException'))
+      await expect(RestrictedDomains.isRestricted('a@blocked.org'))
+        .rejects.toThrow('ProvisionedThroughputExceededException')
+    })
+
+    it('never queries MMD or the flag service', async () => {
+      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
+      await RestrictedDomains.isRestricted('a@open.org')
+      expect(mmd.query).not.toHaveBeenCalled()
+      expect(mmd.poolModuleLoaded).toBe(false)
       expect(mockFetch).not.toHaveBeenCalled()
     })
-
-    it('is false for an invalid email address without querying', async () => {
-      const result = await RestrictedDomains.isRestricted('not-a-valid-email')
-      expect(result).toBe(false)
-      expect(mockQuery).not.toHaveBeenCalled()
-      expect(mockDynamoDBSend).not.toHaveBeenCalled()
-      expect(mockFetch).not.toHaveBeenCalled()
-    })
-
-    it('propagates query errors (registration handler fails open)', async () => {
-      mockQuery.mockRejectedValue(new Error('connection refused'))
-      await expect(RestrictedDomains.isRestricted('tony.stark@avengers.org'))
-        .rejects.toThrow('connection refused')
-    })
   })
 
-  describe('allDomains()', () => {
-    it('returns an array of all domains from DynamoDB', async () => {
-      mockDynamoDBSend.mockResolvedValue({ Items: [{ DomainName: 'cru.org' }, { DomainName: 'avengers.org' }] })
-      const result = await new RestrictedDomains().allDomains()
-      expect(result).toEqual(['cru.org', 'avengers.org'])
-      expect(ScanCommand).toHaveBeenCalledWith({ TableName: 'restricted_domains_dynamodb' })
+  describe('syncDomainsFromMmd()', () => {
+    it('puts new MMD domains, deletes ones MMD dropped, and reports the counts', async () => {
+      const filler = domains(2000)
+      mockMmd([' Example.org ', 'b.org', null, '', ...filler])
+      mockTable([['b.org', 'old.org', ...filler]])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })
+      expect(mmd.query).toHaveBeenCalledWith(MMD_QUERY)
+      expect(batchWrites()).toEqual([[put('example.org'), del('old.org')]])
     })
 
-    it('returns empty array when Items is undefined', async () => {
-      mockDynamoDBSend.mockResolvedValue({})
-      const result = await new RestrictedDomains().allDomains()
-      expect(result).toEqual([])
-    })
-  })
-
-  describe('googleSheetDomains()', () => {
-    it('returns an array of all the domains in the google sheet', async () => {
-      mockSpreadsheetsGet.mockResolvedValue({ data: { values: [['cru.org'], ['Avengers.org'], ['example.com']] } })
-      const result = await new RestrictedDomains().googleSheetDomains()
-      expect(result).toEqual(['cru.org', 'avengers.org', 'example.com'])
-      expect(auth.JWT).toHaveBeenCalledWith({
-        email: 'client@okta-hooks.example.com',
-        key: '-----BEGIN PRIVATE KEY-----\nabcdefg012345\n-----END PRIVATE KEY-----\n',
-        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
-      })
-      expect(sheets).toHaveBeenCalledWith({ version: 'v4', auth: (auth.JWT as any).mock.instances[0] })
-      expect(mockSpreadsheetsGet).toHaveBeenCalledWith({
-        spreadsheetId: 'google_spreadsheet',
-        range: "'Okta self-service prevention'!A2:A"
-      })
+    it('writes one item for MMD values that differ only by case or whitespace', async () => {
+      mockMmd(['example.org', ' Example.org ', 'EXAMPLE.ORG'])
+      mockTable([[]])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
+      expect(batchWrites()).toEqual([[put('example.org')]])
     })
 
-    it('throws an error if the list is empty', async () => {
-      mockSpreadsheetsGet.mockResolvedValue({ data: {} })
-      await expect(new RestrictedDomains().googleSheetDomains())
-        .rejects.toThrow('Restricted Domains Google sheet returned empty response.')
-    })
-  })
-
-  describe('syncDomainsFromGoogle()', () => {
-    it('updates DynamoDB with changes from Google', async () => {
-      mockSpreadsheetsGet.mockResolvedValue({
-        data: {
-          values: [
-            ['cru.org'],
-            ['Avengers.org'],
-            ['example.com'],
-            ['Cru.org'],
-            ['']]
-        }
-      })
-      mockDynamoDBSend.mockResolvedValue({
-        Items: [
-          { DomainName: 'cru.org' },
-          { DomainName: 'avengers.org' },
-          { DomainName: 'ccci.org' }
-        ]
-      })
-      await new RestrictedDomains().syncDomainsFromGoogle()
-      expect(BatchWriteCommand).toHaveBeenCalledWith({
-        RequestItems: {
-          restricted_domains_dynamodb: [
-            { PutRequest: { Item: { DomainName: 'example.com' } } },
-            { DeleteRequest: { Key: { DomainName: 'ccci.org' } } }
-          ]
-        }
-      })
-    })
-
-    it('does nothing if there are no changes', async () => {
-      mockSpreadsheetsGet.mockResolvedValue({ data: { values: [['cru.org']] } })
-      mockDynamoDBSend.mockResolvedValue({ Items: [{ DomainName: 'cru.org' }] })
-      await new RestrictedDomains().syncDomainsFromGoogle()
+    it('sends no BatchWrite when nothing changed', async () => {
+      mockMmd(['a.org', 'b.org'])
+      mockTable([['a.org', 'b.org']])
+      await expect(sync()).resolves.toEqual({ added: 0, removed: 0 })
       expect(BatchWriteCommand).not.toHaveBeenCalled()
+    })
+
+    it('sends writes in chunks of 25', async () => {
+      mockMmd(domains(60, 'new'))
+      mockTable([[]])
+      await expect(sync()).resolves.toEqual({ added: 60, removed: 0 })
+      expect(batchWrites().map((batch) => batch.length)).toEqual([25, 25, 10])
+    })
+
+    it('reads every Scan page until LastEvaluatedKey runs out', async () => {
+      mockMmd(['a.org', 'b.org', 'c.org'])
+      mockTable([['a.org'], ['b.org'], ['c.org']])
+      await expect(sync()).resolves.toEqual({ added: 0, removed: 0 })
+      expect(vi.mocked(ScanCommand).mock.calls.map(([input]) => input)).toEqual([
+        { TableName: TABLE },
+        { TableName: TABLE, ExclusiveStartKey: { DomainName: 'a.org' } },
+        { TableName: TABLE, ExclusiveStartKey: { DomainName: 'b.org' } }
+      ])
+      expect(BatchWriteCommand).not.toHaveBeenCalled()
+    })
+
+    it('treats a Scan page without Items as empty', async () => {
+      mockMmd(['a.org'])
+      mockDynamoDBSend.mockResolvedValue({})
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
+      expect(batchWrites()).toEqual([[put('a.org')]])
+    })
+
+    describe('UnprocessedItems', () => {
+      let setTimeoutSpy: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        vi.useFakeTimers()
+        setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+      })
+
+      afterEach(() => {
+        setTimeoutSpy.mockRestore()
+        vi.useRealTimers()
+      })
+
+      const waits = () => setTimeoutSpy.mock.calls.map(([, ms]) => ms)
+
+      it('resends unprocessed items after a short wait', async () => {
+        mockMmd(['a.org', 'b.org'])
+        let call = 0
+        mockTable([[]], () => (call++ === 0 ? { UnprocessedItems: { [TABLE]: [put('b.org')] } } : {}))
+        const run = sync()
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toEqual({ added: 2, removed: 0 })
+        expect(batchWrites()).toEqual([[put('a.org'), put('b.org')], [put('b.org')]])
+        expect(waits()).toEqual([200])
+      })
+
+      it('succeeds when the last retry clears the unprocessed items', async () => {
+        mockMmd(['a.org'])
+        let call = 0
+        mockTable([[]], (input) => (call++ < 3 ? { UnprocessedItems: { [TABLE]: input.RequestItems[TABLE] } } : {}))
+        const run = sync()
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toEqual({ added: 1, removed: 0 })
+        expect(BatchWriteCommand).toHaveBeenCalledTimes(4)
+        expect(waits()).toEqual([200, 400, 800])
+      })
+
+      it('fails the run when items stay unprocessed after 3 retries, and sends nothing after', async () => {
+        mockMmd(domains(30, 'new'))
+        mockTable([[]], (input) => ({ UnprocessedItems: { [TABLE]: input.RequestItems[TABLE] } }))
+        const run = sync()
+        const assertion = expect(run).rejects.toThrow('25 restricted-domain writes unprocessed after 3 retries')
+        await vi.runAllTimersAsync()
+        await assertion
+        // 1 send + 3 retries of the first chunk. The second chunk is never sent.
+        expect(batchWrites().map((batch) => batch.length)).toEqual([25, 25, 25, 25])
+        expect(waits()).toEqual([200, 400, 800])
+      })
+    })
+
+    describe('guards (write nothing and throw)', () => {
+      it('rejects with the MMD error when the query fails', async () => {
+        mmd.query.mockRejectedValue(new Error('connection refused'))
+        mockTable([['a.org']])
+        await expect(sync()).rejects.toThrow('connection refused')
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('rejects with the DynamoDB error when the Scan fails', async () => {
+        mockMmd(['a.org'])
+        mockDynamoDBSend.mockRejectedValue(new Error('ResourceNotFoundException'))
+        await expect(sync()).rejects.toThrow('ResourceNotFoundException')
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('refuses when MMD returns no rows', async () => {
+        mockMmd([])
+        mockTable([domains(2165)])
+        const run = sync()
+        await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        await expect(run).rejects.toThrow(/zero-rows guard.*0 restricted domains.*2165/)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('refuses when MMD returns only null or empty domains', async () => {
+        mockMmd([null, '', '  '])
+        mockTable([['a.org']])
+        await expect(sync()).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('still refuses an empty MMD answer when allowLargeDelete is set', async () => {
+        mockMmd([])
+        mockTable([['a.org']])
+        await expect(sync({ allowLargeDelete: true })).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('refuses to delete more than 10% of a large table (2,165 rows, 300 deletes, limit 217)', async () => {
+        const table = domains(2165)
+        mockMmd(table.slice(300))
+        mockTable([table])
+        const run = sync()
+        await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        await expect(run).rejects.toThrow(/shrink guard.*300 of 2165.*limit of 217.*allowLargeDelete/)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('writes the same large delete when the event sets allowLargeDelete', async () => {
+        const table = domains(2165)
+        mockMmd(table.slice(300))
+        mockTable([table])
+        await expect(sync({ allowLargeDelete: true })).resolves.toEqual({ added: 0, removed: 300 })
+        expect(batchWrites().flat()).toEqual(table.slice(0, 300).map(del))
+      })
+
+      it('allows exactly the limit (2,165 rows, 217 deletes)', async () => {
+        const table = domains(2165)
+        mockMmd(table.slice(217))
+        mockTable([table])
+        await expect(sync()).resolves.toEqual({ added: 0, removed: 217 })
+      })
+
+      it('allows 100 deletes from a small table (150 rows, limit 100)', async () => {
+        const table = domains(150)
+        mockMmd(table.slice(100))
+        mockTable([table])
+        await expect(sync()).resolves.toEqual({ added: 0, removed: 100 })
+      })
+
+      it('refuses 101 deletes from a small table (150 rows, limit 100)', async () => {
+        const table = domains(150)
+        mockMmd(table.slice(101))
+        mockTable([table])
+        await expect(sync()).rejects.toThrow(/shrink guard.*101 of 150.*limit of 100/)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
     })
   })
 })
