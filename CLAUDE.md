@@ -45,7 +45,7 @@ npm run test tests/path/to/file.test.ts
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
 - `RestrictedDomains` - Blocked email domains. MMD Postgres (`Domains.is_idm_self_service_prevention`) is the source of truth. The DynamoDB table in `DYNAMODB_RESTRICTED_DOMAINS` is a copy, so a domain newly restricted in MMD takes up to 15 minutes to block sign-ups.
   - `isRestricted(email)` (registration hook) does one DynamoDB `GetItem` on the lowercased domain. Exact match only, no subdomain or parent matching; an address with no domain is not restricted. It never calls MMD, so an MMD outage cannot change a sign-up decision. Its client gives up fast (600 ms per attempt, 2 attempts), and it throws on any DynamoDB error.
-  - `syncDomainsFromMmd()` (scheduled job) reads MMD, scans the table, and writes only the difference in `BatchWrite` chunks of 25, retrying `UnprocessedItems`. It writes nothing and throws when the MMD query fails, MMD returns zero domains, or the run would delete more than `max(ceil(10% of the table), 100)` rows. A deliberate large removal is one manual invoke with the event `{"allowLargeDelete": true}`. The refresh has its own DynamoDB client with the SDK's default retries and timeouts, so one throttle or slow Scan page does not fail the run.
+  - `syncDomainsFromMmd()` (scheduled job) reads MMD, scans the table, and writes only the difference in `BatchWrite` chunks of 25, retrying `UnprocessedItems`. It writes nothing and throws when the MMD query fails or MMD returns zero domains. When the run would delete more than `max(ceil(10% of the table), 100)` rows (the shrink guard), it still writes the adds, skips every delete, and throws. Every run fails the same way until someone acts, so the "restricted-domain refresh failing" Datadog monitor (4 failed runs in an hour) fires. A deliberate large removal is one manual invoke with the event `{"allowLargeDelete": true}`. The refresh has its own DynamoDB client with the SDK's default retries and timeouts, so one throttle or slow Scan page does not fail the run.
   - The job passes the MMD pool to the constructor. The model never imports `src/config/db.ts`, so the registration bundle carries no `pg`.
   - History (Flightdeck OKHOOKS-7): the refresh from MMD replaced a Google Sheet feed into the same table, and before this design the hook queried MMD during each sign-up. The `restricted_domains_postgres` feature flag that once picked the source was retired 2026-10-02: checking it called the pipeline v2 flag service on every sign-up, which often timed out and pushed the hook past Okta's 3 s limit. The flag is left in the flag service, because `cru app flags rm` burns the name forever.
 - `GlobalRegistry` - CruGlobal registry client wrapper
@@ -71,12 +71,14 @@ refuses the sign-up with its own generic error
   never sees these. A Datadog log monitor on that event (cru-terraform
   `applications/okta-hooks`) is the alert.
 
-**Rollout: the first refresh may refuse.** Before the MMD refresh, the table held
-the Google Sheet's rows. If the Sheet and MMD differ by more than the shrink
-limit, the first refresh fails with the shrink guard error and writes nothing,
-and so does every run after it. Compare the table with MMD, then invoke
-`sync_restricted_domains` once with the event `{"allowLargeDelete": true}`.
-Scheduled runs work on their own after that.
+**Rollout: the first refresh may hold back deletes.** Before the MMD refresh, the
+table held the Google Sheet's rows. The first refresh writes every domain MMD
+restricts that the Sheet lacked, right away. If the Sheet holds more domains
+that MMD lacks than the shrink limit allows, that run skips all of those
+deletes and fails with the shrink guard error, and so does every run after it.
+Compare the table with MMD, then invoke `sync_restricted_domains` once with the
+event `{"allowLargeDelete": true}` to apply the deletes. Scheduled runs work on
+their own after that.
 
 ## Global Registry access is scoped by credential
 

@@ -118,7 +118,11 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
   - MMD unreachable or the query fails: write nothing, fail the run.
   - MMD returns zero rows: write nothing, fail the run.
   - The run would delete more than 10% of the current rows, or more than 100 rows,
-    whichever is larger: write nothing, fail the run, and say so in the error. A
+    whichever is larger (the shrink guard): apply the adds, skip every delete, fail
+    the run, and say so in the error (how many adds went in, how many deletes were
+    skipped, and how to override). Adds only grow the restricted set, so they are
+    always safe; holding them back would let newly restricted domains sign up. Every
+    run fails the same way until someone acts, so the stale-copy alert fires. A
     deliberate large removal is done by invoking the job once with the event
     `{ "allowLargeDelete": true }`. The builder may adjust the thresholds after the
     parity check (Rollout step 1) shows real numbers; the rule stays "a big shrink needs a
@@ -213,8 +217,9 @@ TDD. Unit tests mock DynamoDB and `pg`.
   call still answers inside the budget; case-insensitive domain matching; an address
   with no domain is allowed.
 - Refresh: correct diff (adds, removes, no-op); chunking at 25 and retry of
-  `UnprocessedItems`; each guard (MMD error, zero rows, large shrink) writes nothing and
-  throws; `allowLargeDelete` bypasses only the shrink guard; null and mixed-case domains
+  `UnprocessedItems`; the MMD-error and zero-rows guards write nothing and throw; a
+  large shrink writes only the adds, sends no deletes, and throws, and a failed add
+  surfaces its own error; `allowLargeDelete` bypasses only the shrink guard; null and mixed-case domains
   are normalized.
 - `npm run lint`, `npm run typecheck`, and `npm run test` all pass with no skipped issues.
 
