@@ -6,11 +6,16 @@ export const SNSClient = vi.fn().mockImplementation(function () {
   return { send: mockSNSSend }
 })
 
-// DynamoDB DocumentClient mock
+// DynamoDB DocumentClient mock. Every document client shares one send mock. Each
+// keeps the client it wraps, so a test can read the config behind a call from
+// mockDynamoDBSend.mock.contexts.
 export const mockDynamoDBSend = vi.fn()
-export const DynamoDBClient = vi.fn()
+export const DynamoDBClient = vi.fn().mockImplementation(function (this: { config: unknown }, config: unknown) {
+  this.config = config
+})
 export const DynamoDBDocumentClient = {
-  from: vi.fn().mockImplementation(() => ({
+  from: vi.fn().mockImplementation((client: unknown) => ({
+    client,
     send: mockDynamoDBSend
   }))
 }

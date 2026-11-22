@@ -32,9 +32,20 @@ vi.mock('@aws-sdk/lib-dynamodb', async () => {
   }
 })
 
-// The client is built once at module scope. Capture its config before
+// The clients are built once at module scope. Capture their configs before
 // beforeEach clears the mock's call history.
-const dynamoDbClientConfig = vi.mocked(DynamoDBClient).mock.calls[0]?.[0]
+const dynamoDbClientConfigs = vi.mocked(DynamoDBClient).mock.calls.map(([config]) => config)
+
+// The sign-up lookup gives up fast. The refresh keeps the SDK defaults.
+const LOOKUP_CLIENT_CONFIG = {
+  maxAttempts: 2,
+  requestHandler: { connectionTimeout: 500, requestTimeout: 600, throwOnRequestTimeout: true }
+}
+const REFRESH_CLIENT_CONFIG = {}
+
+// The config of the DynamoDBClient behind each send, in call order.
+const sendClientConfigs = () =>
+  mockDynamoDBSend.mock.contexts.map((documentClient) => (documentClient as { client: { config: unknown } }).client.config)
 
 const TABLE = 'restricted_domains_dynamodb'
 const MMD_QUERY = 'SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
@@ -84,12 +95,11 @@ describe('RestrictedDomains', () => {
     mmd.query.mockReset()
   })
 
-  describe('DynamoDB client', () => {
-    it('gives up on a hung request instead of waiting', () => {
-      expect(dynamoDbClientConfig).toEqual({
-        maxAttempts: 2,
-        requestHandler: { connectionTimeout: 500, requestTimeout: 600, throwOnRequestTimeout: true }
-      })
+  describe('DynamoDB clients', () => {
+    it('builds a lookup client that gives up on a hung request and a refresh client with SDK defaults', () => {
+      expect(dynamoDbClientConfigs).toHaveLength(2)
+      expect(dynamoDbClientConfigs).toContainEqual(LOOKUP_CLIENT_CONFIG)
+      expect(dynamoDbClientConfigs).toContainEqual(REFRESH_CLIENT_CONFIG)
     })
   })
 
@@ -114,6 +124,12 @@ describe('RestrictedDomains', () => {
       expect(result).toBe(true)
       expect(GetCommand).toHaveBeenCalledWith({ TableName: TABLE, Key: { DomainName: 'blocked.org' } })
       expect(mockDynamoDBSend).toHaveBeenCalledTimes(1)
+    })
+
+    it('reads through the lookup client, which gives up fast', async () => {
+      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
+      await RestrictedDomains.isRestricted('a@open.org')
+      expect(sendClientConfigs()).toEqual([LOOKUP_CLIENT_CONFIG])
     })
 
     it('is false when the domain is not in the table', async () => {
@@ -151,6 +167,15 @@ describe('RestrictedDomains', () => {
       await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })
       expect(mmd.query).toHaveBeenCalledWith(MMD_QUERY)
       expect(batchWrites()).toEqual([[put('example.org'), del('old.org')]])
+    })
+
+    it('scans and writes through the refresh client, not the lookup client', async () => {
+      // A single throttle or slow Scan page should not fail a 15-minute refresh.
+      mockMmd(['a.org', 'b.org'])
+      mockTable([['b.org', 'old.org']])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })
+      // One Scan, then one BatchWrite.
+      expect(sendClientConfigs()).toEqual([REFRESH_CLIENT_CONFIG, REFRESH_CLIENT_CONFIG])
     })
 
     it('writes one item for MMD values that differ only by case or whitespace', async () => {

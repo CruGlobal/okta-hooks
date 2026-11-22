@@ -48,24 +48,29 @@ const dynamoDbRequest = (type: DynamoDbRequestType, domain: string): DynamoDbReq
 
 const normalizeDomain = (domain: string): string => domain.trim().toLowerCase()
 
-// Built once per container. The sign-up check has to answer or fail well inside
-// Okta's 3 s hook limit: each attempt gives up after 600 ms and there is one
-// retry, so a hung or unreachable DynamoDB fails in about 1.3 s. A throttled
-// first attempt backs off up to 1 s before the retry. Without
-// throwOnRequestTimeout the SDK only logs a warning at requestTimeout and keeps
-// waiting.
-const documentClient = DynamoDBDocumentClient.from(
+// Both clients are built once per container.
+//
+// The sign-up check has to answer or fail well inside Okta's 3 s hook limit:
+// each attempt gives up after 600 ms and there is one retry, so a hung or
+// unreachable DynamoDB fails in about 1.3 s. A throttled first attempt backs off
+// up to 1 s before the retry. Without throwOnRequestTimeout the SDK only logs a
+// warning at requestTimeout and keeps waiting.
+const lookupClient = DynamoDBDocumentClient.from(
   new DynamoDBClient({
     maxAttempts: 2,
     requestHandler: { connectionTimeout: 500, requestTimeout: 600, throwOnRequestTimeout: true }
   })
 )
 
+// The refresh has no one waiting on it, so it keeps the SDK's default retries
+// and timeouts. One throttle or slow Scan page should not fail the run.
+const refreshClient = DynamoDBDocumentClient.from(new DynamoDBClient({}))
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Sends one BatchWrite and returns the requests DynamoDB did not process.
 const sendBatch = async (tableName: string, requests: DynamoDbRequest[]): Promise<DynamoDbRequest[]> => {
-  const result = await documentClient.send(
+  const result = await refreshClient.send(
     new BatchWriteCommand({ RequestItems: { [tableName]: requests } })
   )
   return (result.UnprocessedItems?.[tableName] ?? []) as DynamoDbRequest[]
@@ -110,7 +115,7 @@ class RestrictedDomains {
       return false
     }
 
-    const result = await documentClient.send(
+    const result = await lookupClient.send(
       new GetCommand({
         TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
         Key: { DomainName: normalizeDomain(parsedAddress.domain) }
@@ -123,7 +128,7 @@ class RestrictedDomains {
     const domains: string[] = []
     let exclusiveStartKey: Record<string, unknown> | undefined
     do {
-      const page = await documentClient.send(
+      const page = await refreshClient.send(
         new ScanCommand({
           TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
           ...(exclusiveStartKey && { ExclusiveStartKey: exclusiveStartKey })
