@@ -30,7 +30,9 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
 - **Option C.** The sign-up check decides from a copy of MMD's restricted-domain list kept
   in DynamoDB. MMD is not called during a sign-up, so an MMD outage cannot affect sign-ups.
 - The copy lives in the existing table `okta-hooks-{env}-restricted-domains`. The Google
-  Sheet feed is replaced by a refresh from MMD every **15 minutes**.
+  Sheet feed is replaced by a refresh from MMD on the job's existing **3-hour** schedule.
+  (The design first proposed every 15 minutes. After review on cru-terraform #13616,
+  Jon kept 3 hours, 2026-11-23.)
 - **If DynamoDB can't be read, refuse every sign-up** with a "please try again in a few
   minutes" message. No fallback to MMD.
 - **The hook always returns an explicit ALLOW or DENY.** It never relies on a 204 / empty
@@ -47,7 +49,7 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
 
 ## Non-goals
 
-- A retry queue. The decision must be made inside Okta's 3 s window, and the 15-minute
+- A retry queue. The decision must be made inside Okta's 3 s window, and the 3-hour
   schedule is the refresh's retry. (A queue was considered and dropped: see Approaches.)
 - Changing the SNS handlers (create, status change, update profile). None of them use MMD.
 - Changing what MMD marks as restricted, or mmd-api.
@@ -67,7 +69,7 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
 - **B. Fail closed on MMD errors.** Simplest, but turns away real sign-ups during every
   MMD outage.
 - **C. Decide from a DynamoDB copy refreshed from MMD (chosen).** Decisions stay correct
-  through MMD outages. Costs: a domain newly restricted in MMD takes up to 15 minutes to
+  through MMD outages. Costs: a domain newly restricted in MMD takes up to 3 hours to
   take effect, and the copy needs a guarded refresh and a staleness alert.
 
 ## Design
@@ -128,9 +130,11 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
     parity check (Rollout step 1) shows real numbers; the rule stays "a big shrink needs a
     human".
 - A failed run throws after reporting to Rollbar, so Lambda counts it as an error. The
-  next run, 15 minutes later, is the retry. Async retries for this function stay at the
+  next run, 3 hours later, is the retry. Async retries for this function stay at the
   module default.
-- Schedule: `cron(0/15 * * * ? *)` (every 15 minutes) in stage and prod.
+- Schedule: unchanged at `cron(0 0/3 * * ? *)` (every 3 hours) in stage and prod. A
+  domain newly restricted in MMD blocks sign-ups within 3 hours; a manual invoke of the
+  job applies it at once.
 - The Google Sheet code is removed: `googleSheetDomains`, `syncDomainsFromGoogle`, the
   `@googleapis/sheets` dependency, `tests/mocks/googleapis-sheets.ts`, and related tests.
   The DynamoDB SDK dependencies stay.
@@ -140,9 +144,9 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
 Two Datadog monitors per environment (prod required; stage optional and quiet), notifying
 Jon only (`@jon.watson@cru.org`), defined in cru-terraform `applications/okta-hooks`:
 
-1. **Stale copy:** every refresh in the last hour failed, or the job did not run. For
-   example `sum(last_1h):sum:aws.lambda.errors{functionname:okta-hooks-prod-sync_restricted_domains}.as_count() >= 4`,
-   plus a no-data / zero-invocations condition so a stopped schedule also alerts.
+1. **Stale copy:** no successful refresh in about two scheduled runs (a 7-hour window
+   holds at least two 3-hour runs), or the job did not run at all (no data). The exact
+   query lives in cru-terraform `applications/okta-hooks/monitors.tf`.
 2. **Check errors:** any registration hook check error in the last 5-15 minutes.
 
 The registration hook returns HTTP 200 even on error, so the Lambda error metric does
@@ -157,9 +161,9 @@ which signal actually reaches Datadog for okta-hooks before choosing:
 
 ### Terraform (cru-terraform, stage and prod)
 
-- In `prod/` and `stage/application.tf`: change the `sync_restricted_domains` schedule
-  from `cron(0 0/3 * * ? *)` to every 15 minutes, and update the function description,
-  which still says "from Google Sheet".
+- No schedule change: `sync_restricted_domains` stays at `cron(0 0/3 * * ? *)`. The
+  function description, which still says "from Google Sheet", is left as is, because
+  changing it publishes a new Lambda version and moves the `live` alias.
 - No database or network change: `PG_*`, `use_vpc` and the security groups are set for
   the whole module, so the sync function already has the same MMD access as
   `registration` (verified in both environments).
@@ -190,7 +194,7 @@ to prod.
 1. **Parity check, stage and prod (read-only):** compare the table's current contents
    (from the Google Sheet) with MMD's restricted set. Report additions and removals to
    Jon before any cutover. This also sets the guard thresholds.
-2. **Terraform PR:** schedule change and monitors. Apply
+2. **Terraform PR:** the two monitors. Apply
    after DevOps approval.
 3. **Code PR** with tests and an independent review. Merge, build, confirm stage runs it.
 4. **Stage verification:** run the refresh by hand (`cru app impersonate ... aws lambda

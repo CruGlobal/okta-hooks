@@ -170,7 +170,7 @@ describe('RestrictedDomains', () => {
     })
 
     it('scans and writes through the refresh client, not the lookup client', async () => {
-      // A single throttle or slow Scan page should not fail a 15-minute refresh.
+      // A single throttle or slow Scan page should not fail a scheduled refresh.
       mockMmd(['a.org', 'b.org'])
       mockTable([['b.org', 'old.org']])
       await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })

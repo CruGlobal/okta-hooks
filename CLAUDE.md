@@ -38,14 +38,14 @@ npm run test tests/path/to/file.test.ts
 
 3. **Scheduled Handlers** (`schedule/`)
    - `sync-missing-okta-users.ts` - Re-syncs users missing Global Registry IDs (every 30 minutes)
-   - `sync-restricted-domains.ts` - Refreshes the DynamoDB copy of restricted domains from MMD Postgres (every 15 minutes), with guards against emptying it
+   - `sync-restricted-domains.ts` - Refreshes the DynamoDB copy of restricted domains from MMD Postgres (every 3 hours), with guards against emptying it
 
 **Models** (`src/models/`):
 - `HookResponse` - Builds Okta hook response format with ALB response conversion
 - `RegistrationRequest` / `OktaRequest` / `OktaEvent` - Parse incoming Okta payloads
-- `RestrictedDomains` - Blocked email domains. MMD Postgres (`Domains.is_idm_self_service_prevention`) is the source of truth. The DynamoDB table in `DYNAMODB_RESTRICTED_DOMAINS` is a copy, so a domain newly restricted in MMD takes up to 15 minutes to block sign-ups.
+- `RestrictedDomains` - Blocked email domains. MMD Postgres (`Domains.is_idm_self_service_prevention`) is the source of truth. The DynamoDB table in `DYNAMODB_RESTRICTED_DOMAINS` is a copy, so a domain newly restricted in MMD takes up to 3 hours to block sign-ups. A manual invoke of `sync_restricted_domains` applies it at once.
   - `isRestricted(email)` (registration hook) does one DynamoDB `GetItem` on the lowercased domain. Exact match only, no subdomain or parent matching; an address with no domain is not restricted. It never calls MMD, so an MMD outage cannot change a sign-up decision. Its client gives up fast (600 ms per attempt, 2 attempts), and it throws on any DynamoDB error.
-  - `syncDomainsFromMmd()` (scheduled job) reads MMD, scans the table, and writes only the difference in `BatchWrite` chunks of 25, retrying `UnprocessedItems`. It writes nothing and throws when the MMD query fails or MMD returns zero domains. When the run would delete more than `max(ceil(10% of the table), 100)` rows (the shrink guard), it still writes the adds, skips every delete, and throws. Every run fails the same way until someone acts, so the "restricted-domain refresh failing" Datadog monitor (4 failed runs in an hour) fires. A deliberate large removal is one manual invoke with the event `{"allowLargeDelete": true}`. The refresh has its own DynamoDB client with the SDK's default retries and timeouts, so one throttle or slow Scan page does not fail the run.
+  - `syncDomainsFromMmd()` (scheduled job) reads MMD, scans the table, and writes only the difference in `BatchWrite` chunks of 25, retrying `UnprocessedItems`. It writes nothing and throws when the MMD query fails or MMD returns zero domains. When the run would delete more than `max(ceil(10% of the table), 100)` rows (the shrink guard), it still writes the adds, skips every delete, and throws. Every run fails the same way until someone acts, so the stale-copy Datadog monitor fires once there has been no successful run across about two scheduled runs. It lives in cru-terraform `applications/okta-hooks/monitors.tf`. A deliberate large removal is one manual invoke with the event `{"allowLargeDelete": true}`. The refresh has its own DynamoDB client with the SDK's default retries and timeouts, so one throttle or slow Scan page does not fail the run.
   - The job passes the MMD pool to the constructor. The model never imports `src/config/db.ts`, so the registration bundle carries no `pg`.
   - History (Flightdeck OKHOOKS-7): the refresh from MMD replaced a Google Sheet feed into the same table, and before this design the hook queried MMD during each sign-up. The `restricted_domains_postgres` feature flag that once picked the source was retired 2026-10-02: checking it called the pipeline v2 flag service on every sign-up, which often timed out and pushed the hook past Okta's 3 s limit. The flag is left in the flag service, because `cru app flags rm` burns the name forever.
 - `GlobalRegistry` - CruGlobal registry client wrapper
@@ -61,7 +61,8 @@ refuses the sign-up with its own generic error
   response means, and the old 204 error path let sign-ups through unchecked.
 - Any error (DynamoDB unreachable, throttled or timed out, a missing table, or
   any other throw) is a DENY with reason `RESTRICTED_DOMAIN_CHECK_UNAVAILABLE`
-  and a "please try again in a few minutes" message in English, fr_FR or pt_BR.
+  and a "please try again in a few minutes" message, with help@checkmyokta.com
+  as the contact if the problem continues, in English, fr_FR or pt_BR.
   It never fails open.
 - The hook answers in about 2 s in every path. The lookup times out after
   1.5 s and the Rollbar report gets at most 0.5 s.
