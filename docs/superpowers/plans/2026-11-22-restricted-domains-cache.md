@@ -15,7 +15,7 @@
 - Every hook response is HTTP 200 with a `com.okta.action.update` command carrying `registration: 'ALLOW'` or `registration: 'DENY'`. No path returns 204.
 - The hook answers in under 2.5 s in every path, including a hung DynamoDB call and a hung Rollbar call.
 - Domain match: lowercase the parsed email domain, exact `GetItem` on `DomainName`. No subdomain or parent matching.
-- MMD query, verbatim: `SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true`. Drop null or empty values.
+- MMD query, verbatim: `SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true`. Drop null or empty values. (Changed 2026-11-23, PR #134: the query no longer lowercases. `normalizeDomain` cleans and case-folds every value; the refresh skips and logs rows it rejects.)
 - BatchWrite chunks of 25. Retry `UnprocessedItems`; fail the run if any remain.
 - Refresh guards write nothing and throw: MMD error; zero rows; deletes > `max(ceil(0.10 * currentCount), 100)` unless the event has `allowLargeDelete: true`. (Changed after the final review: a shrink-guard trip now writes the adds, skips the deletes, then throws. See the spec's Guards section.)
 - New error reason `RESTRICTED_DOMAIN_CHECK_UNAVAILABLE`, location `data.userProfile.login`. English text: `We couldn't finish creating your account. Please try again in a few minutes.` Translated for fr_FR and pt_BR (drafts below, flagged for native review); other locales get English.

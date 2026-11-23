@@ -111,8 +111,10 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
 - The existing `sync_restricted_domains` Lambda is repointed from the Google Sheet to MMD.
   Its handler calls a renamed `syncDomainsFromMmd()`.
 - Source query, through the existing pool in `src/config/db.ts`:
-  `SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true`.
-  Rows with a null or empty domain are dropped.
+  `SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true`.
+  (Changed 2026-11-23, PR #134: the query no longer lowercases. `normalizeDomain` cleans
+  and case-folds every value, and the refresh skips and logs rows it rejects, including
+  null or empty ones.)
 - The job scans the table, diffs, and writes only the difference: puts for new domains,
   deletes for removed ones, in `BatchWrite` chunks of 25 (the DynamoDB maximum). Any
   `UnprocessedItems` are retried with a short back-off, and the run fails if items remain.

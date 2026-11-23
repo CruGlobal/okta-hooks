@@ -2,7 +2,7 @@ import { parseOneAddress, ParsedMailbox } from 'email-addresses'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
 import type { Pool } from 'pg'
-import { compact, difference, chunk, uniq } from 'lodash'
+import { difference, chunk, uniq } from 'lodash'
 
 type DynamoDbRequestType = 'put' | 'delete'
 
@@ -18,8 +18,10 @@ type DynamoDbRequest = DynamoDbPutRequest | DynamoDbDeleteRequest
 
 type MmdQueryable = Pick<Pool, 'query'>
 
+// No lower(): normalizeDomain does all case folding, so Postgres collation and
+// JavaScript's toLowerCase cannot disagree (Turkish İ, for example).
 const MMD_RESTRICTED_DOMAINS_QUERY =
-  'SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
+  'SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
 // DynamoDB's BatchWriteItem maximum.
 const BATCH_WRITE_SIZE = 25
 const UNPROCESSED_RETRY_WAITS_MS = [200, 400, 800]
@@ -46,7 +48,32 @@ const dynamoDbRequest = (type: DynamoDbRequestType, domain: string): DynamoDbReq
   }
 }
 
-const normalizeDomain = (domain: string): string => domain.trim().toLowerCase()
+// Format characters (Unicode category Cf): zero-width spaces and joiners, word
+// joiners, byte order marks, direction marks. They are invisible, so they ride
+// along when a domain is pasted into MMD.
+const FORMAT_CHARACTERS = /\p{Cf}/gu
+// One label: letters and digits in any script, so IDNs pass. Hyphens are allowed
+// inside but not at either end. Combining marks (\p{M}) are allowed after the
+// first character, because scripts such as Devanagari need them. 1 to 63
+// characters.
+const DOMAIN_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]{0,61}[\p{L}\p{M}\p{N}])?$/u
+const MAX_DOMAIN_LENGTH = 253
+const MAX_SKIPPED_VALUES_LOGGED = 50
+
+// Turns an MMD value or an email's domain into a table key, or null when it is
+// not a domain. The refresh and the sign-up lookup both use it, so the key a
+// lookup reads is always the key the refresh wrote. Removes format characters
+// anywhere, composes to NFC (so the NFD and NFC forms of an IDN match), trims,
+// strips one trailing dot and lowercases. Then it needs at least two
+// dot-separated labels and at most 253 characters.
+export const normalizeDomain = (value: string): string | null => {
+  const domain = value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
+  const labels = domain.split('.')
+  if (domain.length > MAX_DOMAIN_LENGTH || labels.length < 2 || !labels.every((label) => DOMAIN_LABEL.test(label))) {
+    return null
+  }
+  return domain
+}
 
 // Both clients are built once per container.
 //
@@ -106,19 +133,22 @@ class RestrictedDomains {
     this.mmd = mmd
   }
 
-  // Exact match on the lowercased domain; no subdomain or parent matching. Throws
-  // on any DynamoDB error, which the registration hook turns into a DENY.
+  // Exact match on the normalized domain; no subdomain or parent matching. An
+  // address with no domain, or one normalizeDomain rejects, is not restricted
+  // and is never looked up: the refresh never stores such a key. Throws on any
+  // DynamoDB error, which the registration hook turns into a DENY.
   static async isRestricted(emailAddress: string): Promise<boolean> {
     const parsedAddress = parseOneAddress(emailAddress) as ParsedMailbox | null
+    const domain = parsedAddress?.domain ? normalizeDomain(parsedAddress.domain) : null
 
-    if (!parsedAddress || !parsedAddress.domain) {
+    if (!domain) {
       return false
     }
 
     const result = await lookupClient.send(
       new GetCommand({
         TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
-        Key: { DomainName: normalizeDomain(parsedAddress.domain) }
+        Key: { DomainName: domain }
       })
     )
     return result.Item !== undefined
@@ -140,9 +170,29 @@ class RestrictedDomains {
     return domains
   }
 
+  // MMD's values cleaned by normalizeDomain, without duplicates. A row that is
+  // not a domain (null, a note, a test row) is skipped and never stored. One
+  // warning per run lists the skipped values so the MMD owner can fix them.
   async mmdDomains(): Promise<string[]> {
     const result = await this.mmd.query<{ domain: string | null }>(MMD_RESTRICTED_DOMAINS_QUERY)
-    return uniq(compact(result.rows.map((row) => row.domain && normalizeDomain(row.domain))))
+    const domains: string[] = []
+    const skipped: (string | null)[] = []
+    for (const { domain } of result.rows) {
+      const normalized = normalizeDomain(domain ?? '')
+      if (normalized) {
+        domains.push(normalized)
+      } else {
+        skipped.push(domain)
+      }
+    }
+    if (skipped.length > 0) {
+      console.warn(JSON.stringify({
+        event: 'restricted_domains_skipped_invalid',
+        count: skipped.length,
+        values: skipped.slice(0, MAX_SKIPPED_VALUES_LOGGED)
+      }))
+    }
+    return uniq(domains)
   }
 
   // Makes the table match MMD, writing only the difference. Writes nothing and
@@ -157,7 +207,7 @@ class RestrictedDomains {
 
     if (mmdDomains.length === 0) {
       throw new RestrictedDomainsSyncError(
-        `Restricted domains refresh refused by the zero-rows guard: MMD returned 0 restricted domains and the table holds ${currentDomains.length}. Nothing was written.`
+        `Restricted domains refresh refused by the zero-rows guard: MMD returned 0 valid restricted domains and the table holds ${currentDomains.length}. Nothing was written.`
       )
     }
 
