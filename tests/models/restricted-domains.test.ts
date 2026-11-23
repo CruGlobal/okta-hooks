@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import RestrictedDomains, { RestrictedDomainsSyncError } from '@/models/restricted-domains.js'
+import RestrictedDomains, { RestrictedDomainsSyncError, normalizeDomain } from '@/models/restricted-domains.js'
 import {
   mockDynamoDBSend,
   DynamoDBClient,
@@ -103,6 +103,61 @@ describe('RestrictedDomains', () => {
     })
   })
 
+  // Real MMD rows carry zero-width spaces, trailing dots and notes typed into the
+  // domain column. The refresh and the lookup both go through normalizeDomain.
+  describe('normalizeDomain(value)', () => {
+    // A 253-character name made of 63-character labels.
+    const longest = `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}`
+
+    it.each([
+      ['a zero-width space at the start', '​dimension-x.ch', 'dimension-x.ch'],
+      ['a zero-width space in the middle', 'dimension​-x.eu', 'dimension-x.eu'],
+      ['a zero-width space at the end', 'dimension-x.ch​', 'dimension-x.ch'],
+      ['a byte order mark (U+FEFF)', '﻿example.org', 'example.org'],
+      ['a word joiner (U+2060)', 'exam⁠ple.org', 'example.org'],
+      ['zero-width joiners (U+200C, U+200D)', '‌example.org‍', 'example.org'],
+      ['direction marks (U+200E, U+200F)', '‎example.org‏', 'example.org'],
+      ['surrounding whitespace', ' \texample.org \n', 'example.org'],
+      ['one trailing dot', 'mateus28.com.', 'mateus28.com'],
+      ['uppercase', 'Example.ORG', 'example.org'],
+      ['all of them at once', ' ​MATEUS28.COM. ', 'mateus28.com'],
+      ['an IDN', 'café.fr', 'café.fr'],
+      ['an uppercase IDN', 'CAFÉ.FR', 'café.fr'],
+      ['a punycode IDN', 'xn--caf-dma.fr', 'xn--caf-dma.fr'],
+      // Ends in a vowel sign, a combining mark (category Mc).
+      ['a Devanagari IDN', 'हिन्दी.भारत', 'हिन्दी.भारत'],
+      ['hyphens and digits inside labels', 'a-1.b2-c.co.uk', 'a-1.b2-c.co.uk'],
+      ['a 63-character label', `${'a'.repeat(63)}.org`, `${'a'.repeat(63)}.org`],
+      ['a 253-character name', longest, longest]
+    ])('cleans %s', (_, value, expected) => {
+      expect(normalizeDomain(value)).toBe(expected)
+    })
+
+    it.each([
+      ['a double dot', 'msubridges..com'],
+      ['two trailing dots (only one is stripped)', 'mateus28.com..'],
+      ['a leading dot', '.example.org'],
+      ['a note', 'no more will be added'],
+      ['a note after a domain', 'christfortunisians.com (or christfortunisians.tn if you can find that we (ccci) owns it)'],
+      ['a test row starting with a hyphen', '-test ric'],
+      ['a test row with spaces', 'ric domain test 1'],
+      ['a label starting with a hyphen', '-bad.org'],
+      ['a label ending with a hyphen', 'bad-.org'],
+      ['a hyphen-led label after the first', 'example.-org'],
+      ['a single label', 'localhost'],
+      ['an underscore', 'exa_mple.org'],
+      ['an email address', 'a@example.org'],
+      ['a 64-character label', `${'a'.repeat(64)}.org`],
+      ['a 254-character name', `${longest}d`],
+      ['an empty string', ''],
+      ['only whitespace', '   '],
+      ['only a zero-width space', '​'],
+      ['only a dot', '.']
+    ])('rejects %s', (_, value) => {
+      expect(normalizeDomain(value)).toBeNull()
+    })
+  })
+
   describe('static isRestricted(emailAddress)', () => {
     let mockFetch: ReturnType<typeof vi.spyOn>
 
@@ -144,6 +199,25 @@ describe('RestrictedDomains', () => {
       expect(mockDynamoDBSend).not.toHaveBeenCalled()
     })
 
+    it('matches a row the refresh stored from a dirty MMD value', async () => {
+      // MMD holds '​dimension-x.ch'; the refresh stores 'dimension-x.ch'.
+      mockDynamoDBSend.mockResolvedValue({ Item: { DomainName: 'dimension-x.ch' } })
+      const result = await RestrictedDomains.isRestricted('user@Dimension-X.CH')
+      expect(result).toBe(true)
+      expect(GetCommand).toHaveBeenCalledWith({ TableName: TABLE, Key: { DomainName: 'dimension-x.ch' } })
+    })
+
+    it.each([
+      ['a single-label domain', 'user@localhost'],
+      ['a hyphen-led label', 'user@-bad.org'],
+      ['an underscore', 'user@exa_mple.org'],
+      ['a domain literal', 'user@[192.0.2.1]']
+    ])('is false for %s without reading DynamoDB', async (_, email) => {
+      const result = await RestrictedDomains.isRestricted(email)
+      expect(result).toBe(false)
+      expect(mockDynamoDBSend).not.toHaveBeenCalled()
+    })
+
     it('propagates DynamoDB errors (the registration hook denies)', async () => {
       mockDynamoDBSend.mockRejectedValue(new Error('ProvisionedThroughputExceededException'))
       await expect(RestrictedDomains.isRestricted('a@blocked.org'))
@@ -160,6 +234,19 @@ describe('RestrictedDomains', () => {
   })
 
   describe('syncDomainsFromMmd()', () => {
+    let warn: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      warn.mockRestore()
+    })
+
+    const skippedLog = (values: (string | null)[], count = values.length) =>
+      JSON.stringify({ event: 'restricted_domains_skipped_invalid', count, values })
+
     it('puts new MMD domains, deletes ones MMD dropped, and reports the counts', async () => {
       const filler = domains(2000)
       mockMmd([' Example.org ', 'b.org', null, '', ...filler])
@@ -183,6 +270,60 @@ describe('RestrictedDomains', () => {
       mockTable([[]])
       await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
       expect(batchWrites()).toEqual([[put('example.org')]])
+    })
+
+    it('stores cleaned MMD values, skips invalid ones, and logs the skips once', async () => {
+      const invalid = ['msubridges..com', 'no more will be added', 'ric domain test 1']
+      mockMmd(['​dimension-x.ch', 'mateus28.com.', ...invalid, 'a.org'])
+      mockTable([['a.org']])
+      await expect(sync()).resolves.toEqual({ added: 2, removed: 0 })
+      expect(batchWrites()).toEqual([[put('dimension-x.ch'), put('mateus28.com')]])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(skippedLog(invalid))
+    })
+
+    it('counts null and empty rows as skipped', async () => {
+      mockMmd(['a.org', null, ''])
+      mockTable([['a.org']])
+      await expect(sync()).resolves.toEqual({ added: 0, removed: 0 })
+      expect(warn).toHaveBeenCalledWith(skippedLog([null, '']))
+    })
+
+    it('logs nothing when every MMD value is valid', async () => {
+      mockMmd(['a.org', ' B.org. '])
+      mockTable([['a.org']])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it('logs the full count but at most 50 values', async () => {
+      const invalid = Array.from({ length: 60 }, (_, i) => `test row ${i}`)
+      mockMmd(['a.org', ...invalid])
+      mockTable([['a.org']])
+      await expect(sync()).resolves.toEqual({ added: 0, removed: 0 })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(skippedLog(invalid.slice(0, 50), 60))
+    })
+
+    it('writes one item for MMD values that clean up to the same domain', async () => {
+      mockMmd(['​dimension-x.ch', 'dimension-x.ch.', 'DIMENSION-X.CH'])
+      mockTable([[]])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
+      expect(batchWrites()).toEqual([[put('dimension-x.ch')]])
+    })
+
+    it('replaces dirty keys an earlier refresh stored with their clean versions', async () => {
+      // Before normalization the table took MMD values as they were.
+      mockMmd(['​dimension-x.ch', '​dimension-x.eu', 'no more will be added', 'a.org'])
+      mockTable([['​dimension-x.ch', '​dimension-x.eu', 'no more will be added', 'a.org']])
+      await expect(sync()).resolves.toEqual({ added: 2, removed: 3 })
+      expect(batchWrites()).toEqual([[
+        put('dimension-x.ch'),
+        put('dimension-x.eu'),
+        del('​dimension-x.ch'),
+        del('​dimension-x.eu'),
+        del('no more will be added')
+      ]])
     })
 
     it('sends no BatchWrite when nothing changed', async () => {
@@ -288,7 +429,7 @@ describe('RestrictedDomains', () => {
         mockTable([domains(2165)])
         const run = sync()
         await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
-        await expect(run).rejects.toThrow(/zero-rows guard.*0 restricted domains.*2165/)
+        await expect(run).rejects.toThrow(/zero-rows guard.*0 valid restricted domains.*2165/)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
       })
 
@@ -297,6 +438,17 @@ describe('RestrictedDomains', () => {
         mockTable([['a.org']])
         await expect(sync()).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+      })
+
+      it('refuses when every MMD value is invalid, and still logs the skips', async () => {
+        const invalid = ['no more will be added', 'ric domain test 1', 'msubridges..com']
+        mockMmd(invalid)
+        mockTable([['a.org']])
+        const run = sync()
+        await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
+        await expect(run).rejects.toThrow(/zero-rows guard.*0 valid restricted domains.*1\./)
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(warn).toHaveBeenCalledWith(skippedLog(invalid))
       })
 
       it('still refuses an empty MMD answer when allowLargeDelete is set', async () => {
