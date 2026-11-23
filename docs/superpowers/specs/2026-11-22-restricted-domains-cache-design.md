@@ -81,6 +81,16 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
   `DomainName = <domain>` against `DYNAMODB_RESTRICTED_DOMAINS`. A hit means restricted.
   This exactly matches today's Postgres rule (`lower(domain) = $1`, exact match, no
   subdomain or parent-domain matching).
+- **Amended 2026-11-23: sub-domain rule.** The exact match above is replaced. An
+  email's domain is blocked when it, or any parent domain of it, is in the table. A
+  listed root domain blocks itself and all its sub-domains. A listed sub-domain blocks
+  itself and its own sub-domains, but not its root or the root's other sub-domains.
+  Source: May Workman's "MMD development notes" doc, approved by Jon Watson 2026-11-23.
+  `isRestricted` sends the normalized domain and each parent domain, down to two labels
+  (never the top-level domain alone), as exact keys in one `BatchGetItem`. More than 100
+  keys are split into parallel requests of 100. A hit decides. With no hit, unprocessed
+  keys are resent after 50 ms and then 100 ms, and keys still unprocessed make the check
+  throw, which the hook turns into the "try again" DENY.
 - An address with no parseable domain stays "not restricted", as today.
 - The registration bundle no longer imports `src/config/db.ts` or `pg`.
 - Time budget: the DynamoDB client gets explicit short timeouts (for example 1,000 ms per
