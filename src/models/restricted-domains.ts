@@ -98,9 +98,10 @@ const candidateDomains = (domain: string): string[] => {
 // Both clients are built once per container.
 //
 // The sign-up check has to answer or fail well inside Okta's 3 s hook limit:
-// each attempt gives up after 600 ms and there is one retry, so a hung or
-// unreachable DynamoDB fails in about 1.3 s. A throttled first attempt backs off
-// up to 1 s before the retry. Without throwOnRequestTimeout the SDK only logs a
+// each attempt gets 500 ms to connect and 600 ms for the request, and there is
+// one retry, so the client alone can take over 2 s. A throttled first attempt
+// backs off up to 1 s before the retry. The hook's 1.5 s lookup timeout
+// (CHECK_TIMEOUT_MS) is what bounds the answer. Without throwOnRequestTimeout the SDK only logs a
 // warning at requestTimeout and keeps waiting.
 const lookupClient = DynamoDBDocumentClient.from(
   new DynamoDBClient({
@@ -209,7 +210,7 @@ class RestrictedDomains {
   //
   // Timing: one BatchGet normally takes a few ms. UnprocessedKeys retries add
   // at most 150 ms of waiting and two more requests. Each request is bounded by
-  // the lookup client (about 1.3 s when DynamoDB hangs), and the hook's 1.5 s
+  // the lookup client's timeouts, and the hook's 1.5 s
   // lookup timeout (CHECK_TIMEOUT_MS) caps the whole check, retries included.
   // So a slow DynamoDB still gets the "try again" DENY in time.
   static async isRestricted(emailAddress: string): Promise<boolean> {
