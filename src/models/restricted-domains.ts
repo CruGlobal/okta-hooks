@@ -83,6 +83,16 @@ const DOMAIN_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]{0,61}[\p{L}\p{M}\p{N}])
 const MAX_DOMAIN_LENGTH = 253
 const MAX_SKIPPED_VALUES_LOGGED = 50
 
+// normalizeDomain's cleanup step, with no validation.
+const cleanDomain = (value: string): string =>
+  value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
+
+// normalizeDomain's validation step, for a value that is already clean.
+const isValidDomain = (domain: string): boolean => {
+  const labels = domain.split('.')
+  return domain.length <= MAX_DOMAIN_LENGTH && labels.length >= 2 && labels.every((label) => DOMAIN_LABEL.test(label))
+}
+
 // Turns an MMD value or an email's domain into a table key, or null when it is
 // not a domain. The refresh and the sign-up lookup both use it, so the key a
 // lookup reads is always the key the refresh wrote. Removes format characters
@@ -90,25 +100,40 @@ const MAX_SKIPPED_VALUES_LOGGED = 50
 // strips one trailing dot and lowercases. Then it needs at least two
 // dot-separated labels and at most 253 characters.
 export const normalizeDomain = (value: string): string | null => {
-  const domain = value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
-  const labels = domain.split('.')
-  if (domain.length > MAX_DOMAIN_LENGTH || labels.length < 2 || !labels.every((label) => DOMAIN_LABEL.test(label))) {
-    return null
-  }
-  return domain
+  const domain = cleanDomain(value)
+  return isValidDomain(domain) ? domain : null
 }
 
-// The keys a sign-up check looks up for a normalized domain: the domain and
-// each parent domain, longest first, down to two labels. fr.staff.example.org
-// gives fr.staff.example.org, staff.example.org and example.org. The top-level
-// domain alone ("org", "uk") is never looked up: normalizeDomain needs two
-// labels, and the refresh stores only its output, so the table can never hold a
-// one-label key. Country domains need no special case. A listed agape.org.uk
-// blocks mail.agape.org.uk, and a listed org.uk would block every domain under
-// it, as any other two-label key would.
-const candidateDomains = (domain: string): string[] => {
-  const labels = domain.split('.')
-  return labels.slice(0, -1).map((_, i) => labels.slice(i).join('.'))
+// The keys a sign-up check looks up for an email's domain: the cleaned domain
+// and each parent domain, longest first, down to two labels, keeping only the
+// ones normalizeDomain accepts. fr.staff.example.org gives fr.staff.example.org,
+// staff.example.org and example.org.
+//
+// A label normalizeDomain rejects drops every candidate that contains it, but
+// the parents above it are still checked, so a bad sub-domain label cannot
+// hide a listed parent. foo_bar.cru.org gives only cru.org, and a.b_c.d.cru.org
+// gives d.cru.org and cru.org. With nothing left (a single label, a domain
+// literal, or a bad label in the last two), the list is empty.
+//
+// The top-level domain alone ("org", "uk") is never looked up: normalizeDomain
+// needs two labels, and the refresh stores only its output, so the table can
+// never hold a one-label key. Country domains need no special case. A listed
+// agape.org.uk blocks mail.agape.org.uk, and a listed org.uk would block every
+// domain under it, as any other two-label key would.
+const candidateDomains = (emailDomain: string): string[] => {
+  const labels = cleanDomain(emailDomain).split('.')
+  const candidates: string[] = []
+  // From the shortest suffix up, so it stops once one is too long to be a domain.
+  for (let i = labels.length - 2; i >= 0; i--) {
+    const suffix = labels.slice(i).join('.')
+    if (suffix.length > MAX_DOMAIN_LENGTH) {
+      break
+    }
+    if (isValidDomain(suffix)) {
+      candidates.unshift(suffix)
+    }
+  }
+  return candidates
 }
 
 // Both clients are built once per container.
@@ -231,9 +256,11 @@ class RestrictedDomains {
   // - Otherwise, no marker: throw. The table may be empty or never refreshed,
   //   so finding no domain proves nothing.
   // - Otherwise: not restricted.
-  // The registration hook turns any throw into the "try again" DENY. An address
-  // with no domain, or one normalizeDomain rejects, is not restricted and is
-  // never looked up: the refresh never stores such a key.
+  // The registration hook turns any throw into the "try again" DENY. When the
+  // whole domain fails normalizeDomain, its valid parents are still checked
+  // (see candidateDomains). An address with no domain, or with no valid
+  // candidate left, is not restricted and is never looked up: the refresh never
+  // stores such a key.
   //
   // Timing: one BatchGet normally takes a few ms. UnprocessedKeys retries add
   // at most 150 ms of waiting and two more requests. Each request is bounded by
@@ -242,16 +269,16 @@ class RestrictedDomains {
   // So a slow DynamoDB still gets the "try again" DENY in time.
   static async isRestricted(emailAddress: string): Promise<boolean> {
     const parsedAddress = parseOneAddress(emailAddress) as ParsedMailbox | null
-    const domain = parsedAddress?.domain ? normalizeDomain(parsedAddress.domain) : null
+    const candidates = parsedAddress?.domain ? candidateDomains(parsedAddress.domain) : []
 
-    if (!domain) {
+    if (candidates.length === 0) {
       return false
     }
 
     const tableName = process.env.DYNAMODB_RESTRICTED_DOMAINS!
     // The marker goes first, so it is always in the first request.
     const lookups = await Promise.allSettled(
-      chunk([REFRESH_MARKER_KEY, ...candidateDomains(domain)], BATCH_GET_SIZE)
+      chunk([REFRESH_MARKER_KEY, ...candidates], BATCH_GET_SIZE)
         .map((keys) => findKeys(tableName, keys))
     )
     const found = lookups.flatMap((lookup) => (lookup.status === 'fulfilled' ? lookup.value : []))

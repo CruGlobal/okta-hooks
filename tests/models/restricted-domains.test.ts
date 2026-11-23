@@ -355,10 +355,56 @@ describe('RestrictedDomains', () => {
       expect(batchGetKeys()).toEqual([[MARKER, 'dimension-x.ch']])
     })
 
+    // A label normalizeDomain rejects drops every candidate that contains it, but
+    // the parents above it are still checked. Otherwise a bad sub-domain label
+    // would hide a listed parent. The email parser passes all of these through.
+    describe('a domain with an invalid label', () => {
+      it.each([
+        ['an underscore', 'foo_bar.cru.org', ['cru.org']],
+        ['an underscore deeper down', 'a.b_c.d.cru.org', ['d.cru.org', 'cru.org']],
+        ['a hyphen-led label', '-bad.cru.org', ['cru.org']],
+        ['a hyphen-ended label', 'bad-.cru.org', ['cru.org']],
+        ['a 64-character label', `${'a'.repeat(64)}.cru.org`, ['cru.org']]
+      ])('is blocked when a parent is listed (%s)', async (_, domain, candidates) => {
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted(`jane@${domain}`)).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[MARKER, ...candidates]])
+      })
+
+      it('is allowed after a lookup of only the valid parents when none is listed', async () => {
+        mockLookupTable(['other.org'])
+        await expect(RestrictedDomains.isRestricted('jane@foo_bar.example.org')).resolves.toBe(false)
+        expect(batchGetKeys()).toEqual([[MARKER, 'example.org']])
+      })
+
+      it('cleans the domain the way normalizeDomain does before picking the parents', async () => {
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted('jane@​FOO_BAR.Cru.ORG')).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[MARKER, 'cru.org']])
+      })
+
+      it('checks the parents that fit when the whole domain is over 253 characters', async () => {
+        const label = 'a'.repeat(63)
+        const domain = `${label}.${label}.${label}.${label}.cru.org`
+        expect(domain.length).toBeGreaterThan(253)
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted(`jane@${domain}`)).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[
+          MARKER,
+          `${label}.${label}.${label}.cru.org`,
+          `${label}.${label}.cru.org`,
+          `${label}.cru.org`,
+          'cru.org'
+        ]])
+      })
+    })
+
+    // No candidate is left, so there is nothing to look up.
     it.each([
       ['a single-label domain', 'user@localhost'],
-      ['a hyphen-led label', 'user@-bad.org'],
-      ['an underscore', 'user@exa_mple.org'],
+      ['a hyphen-led label in the only two-label suffix', 'user@-bad.org'],
+      ['an underscore in the only two-label suffix', 'user@exa_mple.org'],
+      ['an invalid top-level label', 'user@cru.org_'],
       ['a domain literal', 'user@[192.0.2.1]']
     ])('is false for %s without reading DynamoDB', async (_, email) => {
       const result = await RestrictedDomains.isRestricted(email)

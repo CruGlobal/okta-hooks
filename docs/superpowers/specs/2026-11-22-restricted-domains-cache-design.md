@@ -86,8 +86,9 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
   listed root domain blocks itself and all its sub-domains. A listed sub-domain blocks
   itself and its own sub-domains, but not its root or the root's other sub-domains.
   Source: May Workman's "MMD development notes" doc, approved by Jon Watson 2026-11-23.
-  `isRestricted` sends the normalized domain and each parent domain, down to two labels
-  (never the top-level domain alone), as exact keys in one `BatchGetItem`. More than 100
+  `isRestricted` sends the domain and each parent domain, down to two labels
+  (never the top-level domain alone), that passes `normalizeDomain`'s checks, so
+  `foo_bar.cru.org` still checks `cru.org`. They go as exact keys in one `BatchGetItem`. More than 100
   keys are split into parallel requests of 100. A hit decides. With no hit, unprocessed
   keys are resent after 50 ms and then 100 ms, and keys still unprocessed make the check
   throw, which the hook turns into the "try again" DENY.

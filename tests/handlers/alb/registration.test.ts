@@ -456,6 +456,13 @@ describe('registration hook', () => {
       expect(bodyOf(response).commands).toStrictEqual([DENY])
       expect(bodyOf(response).error.errorCauses[0].reason).toBe('RESTRICTED_EMAIL_DOMAIN')
     })
+
+    it('should deny a sub-domain with an invalid label when its parent is listed', async () => {
+      mockTable(['cru.org'])
+      const response = await handler(withLogin('jane.doe@foo_bar.cru.org') as any)
+      expect(bodyOf(response).commands).toStrictEqual([DENY])
+      expect(bodyOf(response).error.errorCauses[0].reason).toBe('RESTRICTED_EMAIL_DOMAIN')
+    })
   })
 
   describe('every path answers 200 with an explicit decision', () => {
