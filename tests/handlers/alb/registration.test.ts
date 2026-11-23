@@ -14,7 +14,8 @@ const GUID_VALUE = '00000000-0000-0000-0000-000000000000'
 const ALLOW = { type: 'com.okta.action.update', value: { registration: 'ALLOW' } }
 const DENY = { type: 'com.okta.action.update', value: { registration: 'DENY' } }
 const RESTRICTED_ERROR = 'help@checkmyokta.com must be contacted before this email domain can be used.'
-const TRY_AGAIN_ERROR = "We couldn't finish creating your account. Please try again in a few minutes."
+const TRY_AGAIN_ERROR = "We couldn't finish creating your account. Please try again in a few minutes. If the problem continues, contact help@checkmyokta.com."
+const FR_TRY_AGAIN_ERROR = "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes. Si le problème persiste, contactez help@checkmyokta.com."
 
 const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
 const bodyOf = (response: ALBResult) => JSON.parse(response.body ?? '')
@@ -123,7 +124,7 @@ describe('registration hook', () => {
     })
 
     it.each([
-      ['fr_FR', "Veuillez contacter help@checkmyokta.com avant d'utiliser ce domaine de messagerie."],
+      ['fr_FR', 'Veuillez contacter help@checkmyokta.com avant de créer un compte avec cette adresse e-mail.'],
       ['pt_BR', 'Entre em contato com help@checkmyokta.com antes de usar este domínio de e-mail.']
     ])('should return the restricted domain error for %s in that language', async (locale, errorSummary) => {
       vi.spyOn(RestrictedDomains, 'isRestricted').mockResolvedValue(true)
@@ -187,8 +188,8 @@ describe('registration hook', () => {
     })
 
     it.each([
-      ['fr_FR', "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes."],
-      ['pt_BR', 'Não foi possível concluir a criação da sua conta. Tente novamente em alguns minutos.'],
+      ['fr_FR', FR_TRY_AGAIN_ERROR],
+      ['pt_BR', 'Não foi possível concluir a criação da sua conta. Tente novamente em alguns minutos. Se o problema persistir, entre em contato com help@checkmyokta.com.'],
       ['de_DE', TRY_AGAIN_ERROR],
       ['xx_XX', TRY_AGAIN_ERROR]
     ])('should return the try again error for %s in that language, or English', async (locale, errorSummary) => {
@@ -205,9 +206,7 @@ describe('registration hook', () => {
       })
       const response = await handler(withLocale('fr_FR') as any)
       expect(response.statusCode).toBe(200)
-      expect(bodyOf(response)).toStrictEqual(tryAgainBody(
-        "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes."
-      ))
+      expect(bodyOf(response)).toStrictEqual(tryAgainBody(FR_TRY_AGAIN_ERROR))
       expect(rollbar.error)
         .toHaveBeenCalledWith('registration hook Error', expect.any(Error), { lambdaEvent: withLocale('fr_FR') })
     })

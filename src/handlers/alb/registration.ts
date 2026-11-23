@@ -19,18 +19,20 @@ const ALLOWED_LOCALES = new Set([
   'zh_CN', 'zh_TW'
 ])
 // Blocked-domain errors translated so far. An allowed locale without one gets English.
+// The fr_FR texts come from a native speaker. The pt_BR texts still need a native
+// speaker's check.
 const RESTRICTED_DOMAIN_ERRORS = new Map([
-  ['fr_FR', "Veuillez contacter help@checkmyokta.com avant d'utiliser ce domaine de messagerie."],
+  ['fr_FR', 'Veuillez contacter help@checkmyokta.com avant de créer un compte avec cette adresse e-mail.'],
   ['pt_BR', 'Entre em contato com help@checkmyokta.com antes de usar este domínio de e-mail.']
 ])
 const DEFAULT_RESTRICTED_DOMAIN_ERROR = 'help@checkmyokta.com must be contacted before this email domain can be used.'
 // Shown when the check could not run, so the sign-up is refused. Translated for the
 // same locales as the blocked-domain errors; any other locale gets English.
 const CHECK_UNAVAILABLE_ERRORS = new Map([
-  ['fr_FR', "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes."],
-  ['pt_BR', 'Não foi possível concluir a criação da sua conta. Tente novamente em alguns minutos.']
+  ['fr_FR', "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes. Si le problème persiste, contactez help@checkmyokta.com."],
+  ['pt_BR', 'Não foi possível concluir a criação da sua conta. Tente novamente em alguns minutos. Se o problema persistir, entre em contato com help@checkmyokta.com.']
 ])
-const DEFAULT_CHECK_UNAVAILABLE_ERROR = "We couldn't finish creating your account. Please try again in a few minutes."
+const DEFAULT_CHECK_UNAVAILABLE_ERROR = "We couldn't finish creating your account. Please try again in a few minutes. If the problem continues, contact help@checkmyokta.com."
 
 // Okta waits at most 3 s for this hook, then refuses the sign-up with its own generic
 // error. The lookup gets 1.5 s and the Rollbar report at most 0.5 s, so the hook
