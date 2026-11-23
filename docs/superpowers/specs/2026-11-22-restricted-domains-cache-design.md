@@ -91,6 +91,26 @@ Wed 04:00-04:30 UTC) to 1-2 min (failover). Prod sees about 130 sign-ups a day.
   keys are split into parallel requests of 100. A hit decides. With no hit, unprocessed
   keys are resent after 50 ms and then 100 ms, and keys still unprocessed make the check
   throw, which the hook turns into the "try again" DENY.
+- **Amended 2026-11-23: refresh marker (empty-table guard), approved by Jon.** An empty
+  or never-refreshed table used to allow every sign-up, because finding no domain looked
+  the same as "not restricted". Now:
+  - The refresh writes an item with key `DomainName = '#refresh'` after every successful
+    run, including a run with no changes, holding `LastSuccessAt` (ISO 8601 time) and
+    `DomainCount` (MMD's domain count). It writes the marker last, and never when the
+    zero-rows guard or the shrink guard trips or a write fails. Its scan leaves the
+    marker out, so the marker is never diffed, deleted or counted toward the shrink
+    limit. `normalizeDomain` rejects `#`, so the key can never be a domain.
+  - `isRestricted` reads the marker in the same `BatchGetItem` as the domains (first
+    request only, inside the 100-key limit). A domain found still blocks at once, even
+    with no marker. Unprocessed keys, the marker included, are retried as before, and
+    still unprocessed throws. Every key read with no domain and no marker throws "no
+    refresh marker". Marker found and no domain found allows. The marker never counts as
+    a domain hit.
+  - So a table with no marker gives every sign-up the "try again" DENY and logs
+    `restricted_domain_check_failed`, which fires the alert. A successful refresh ends it.
+    Manual refresh:
+    `cru app impersonate -n okta-hooks -e staging -- aws lambda invoke --function-name okta-hooks-stage-sync_restricted_domains --cli-binary-format raw-in-base64-out --payload '{}' /dev/stdout`
+    (for prod: `-e production` and `okta-hooks-prod-sync_restricted_domains`).
 - An address with no parseable domain stays "not restricted", as today.
 - The registration bundle no longer imports `src/config/db.ts` or `pg`.
 - Time budget: the DynamoDB client gets explicit short timeouts (for example 1,000 ms per
@@ -221,6 +241,13 @@ to prod.
 The refresh must populate the table from MMD (step 4/5) before the hook's new code is
 relied on in each environment. The table already holds the Sheet's 2,165 rows, so the
 hook is never reading an empty table.
+
+**Amended 2026-11-23: refresh marker.** With the empty-table guard, the hook needs the
+marker that only a successful refresh by the new code writes. After the first deploy of
+that code to an environment, invoke the refresh once right away (command in the Sign-up
+check amendment), or every sign-up gets the "try again" DENY until the next scheduled
+run, up to 3 hours later. If that run trips the shrink guard, it writes no marker, so
+sign-ups stay denied until the `{"allowLargeDelete": true}` invoke succeeds.
 
 ## Testing
 

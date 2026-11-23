@@ -1,6 +1,12 @@
 import { parseOneAddress, ParsedMailbox } from 'email-addresses'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, BatchGetCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
+import {
+  DynamoDBDocumentClient,
+  BatchGetCommand,
+  ScanCommand,
+  BatchWriteCommand,
+  PutCommand
+} from '@aws-sdk/lib-dynamodb'
 import type { Pool } from 'pg'
 import { difference, chunk, uniq } from 'lodash'
 
@@ -36,6 +42,16 @@ const UNPROCESSED_KEYS_RETRY_WAITS_MS = [50, 100]
 // whichever is larger. More needs a person: invoke with {"allowLargeDelete": true}.
 const MAX_DELETE_PERCENT = 10
 const MIN_DELETE_LIMIT = 100
+
+// The key of the item the refresh writes after every successful run, with
+// LastSuccessAt and DomainCount. The sign-up check reads it in the same
+// BatchGet as the domains. When it is missing, the table may be empty or never
+// refreshed, so finding no domain proves nothing, and the check throws instead
+// of letting everyone sign up. normalizeDomain rejects '#', so this key can
+// never be a domain, and the refresh never diffs, counts or deletes it.
+export const REFRESH_MARKER_KEY = '#refresh'
+
+const isDomainKey = (key: string): boolean => key !== REFRESH_MARKER_KEY
 
 export class RestrictedDomainsSyncError extends Error {
   constructor(message: string) {
@@ -141,31 +157,35 @@ const batchWrite = async (requests: DynamoDbRequest[]): Promise<void> => {
   }
 }
 
-// Sends one BatchGet of at most 100 keys. Says whether any key is in the table,
-// and returns the keys DynamoDB did not process.
+// Sends one BatchGet of at most 100 keys. Returns the keys found in the table
+// and the keys DynamoDB did not process.
 const sendBatchGet = async (
   tableName: string,
   keys: DomainKey[]
-): Promise<{ found: boolean; unprocessed: DomainKey[] }> => {
+): Promise<{ found: string[]; unprocessed: DomainKey[] }> => {
   const result = await lookupClient.send(
     new BatchGetCommand({ RequestItems: { [tableName]: { Keys: keys, ProjectionExpression: 'DomainName' } } })
   )
   return {
-    found: (result.Responses?.[tableName] ?? []).length > 0,
+    found: (result.Responses?.[tableName] ?? []).map((item) => item.DomainName as string),
     unprocessed: (result.UnprocessedKeys?.[tableName]?.Keys ?? []) as DomainKey[]
   }
 }
 
-// Whether any of these domains (at most 100) is a key in the table. A hit
-// decides at once, even when DynamoDB left other keys unprocessed. With no hit,
-// only the unprocessed keys are sent again, after 50 ms and then 100 ms. Keys
-// still unprocessed after that make it throw. A key DynamoDB did not read is
-// never taken as "not listed".
-const anyListed = async (tableName: string, domains: string[]): Promise<boolean> => {
-  let keys: DomainKey[] = domains.map((DomainName) => ({ DomainName }))
+// Which of these keys (at most 100: domains, plus the refresh marker in the
+// first request) are in the table. A domain hit decides at once, even when
+// DynamoDB left other keys unprocessed. Finding only the marker does not,
+// because an unprocessed key may be a listed domain. Otherwise only the
+// unprocessed keys are sent again, after 50 ms and then 100 ms, and keys still
+// unprocessed after that make it throw. A key DynamoDB did not read is never
+// taken as "not listed" or "no marker".
+const findKeys = async (tableName: string, names: string[]): Promise<string[]> => {
+  const found: string[] = []
+  let keys: DomainKey[] = names.map((DomainName) => ({ DomainName }))
   for (let retry = 0; ; retry++) {
-    const { found, unprocessed } = await sendBatchGet(tableName, keys)
-    if (found || unprocessed.length === 0) {
+    const { found: foundNow, unprocessed } = await sendBatchGet(tableName, keys)
+    found.push(...foundNow)
+    if (found.some(isDomainKey) || unprocessed.length === 0) {
       return found
     }
     if (retry === UNPROCESSED_KEYS_RETRY_WAITS_MS.length) {
@@ -200,13 +220,20 @@ class RestrictedDomains {
   // and cru.org.example.com never match cru.org. (Rule from May Workman's "MMD
   // development notes", approved by Jon Watson 2026-11-23.)
   //
-  // Every candidate goes in one BatchGet. BatchGetItem takes at most 100 keys,
-  // and a 253-character domain can have 126 candidates, so a longer list is
-  // split into requests of 100 sent in parallel. A hit in any request decides,
-  // even if another request failed. With no hit, any failure throws, and the
-  // registration hook turns that into a DENY. An address with no domain, or one
-  // normalizeDomain rejects, is not restricted and is never looked up: the
-  // refresh never stores such a key.
+  // Every candidate goes in one BatchGet, with the refresh marker. BatchGetItem
+  // takes at most 100 keys, and a 253-character domain can have 126 candidates,
+  // so a longer list is split into requests of 100 sent in parallel. The marker
+  // rides in the first request only. The decision:
+  // - A domain found in any request: restricted, even if another request failed
+  //   or the marker is missing.
+  // - Otherwise, any failed request (an error, or keys still unprocessed after
+  //   the retries): throw.
+  // - Otherwise, no marker: throw. The table may be empty or never refreshed,
+  //   so finding no domain proves nothing.
+  // - Otherwise: not restricted.
+  // The registration hook turns any throw into the "try again" DENY. An address
+  // with no domain, or one normalizeDomain rejects, is not restricted and is
+  // never looked up: the refresh never stores such a key.
   //
   // Timing: one BatchGet normally takes a few ms. UnprocessedKeys retries add
   // at most 150 ms of waiting and two more requests. Each request is bounded by
@@ -222,19 +249,29 @@ class RestrictedDomains {
     }
 
     const tableName = process.env.DYNAMODB_RESTRICTED_DOMAINS!
+    // The marker goes first, so it is always in the first request.
     const lookups = await Promise.allSettled(
-      chunk(candidateDomains(domain), BATCH_GET_SIZE).map((domains) => anyListed(tableName, domains))
+      chunk([REFRESH_MARKER_KEY, ...candidateDomains(domain)], BATCH_GET_SIZE)
+        .map((keys) => findKeys(tableName, keys))
     )
-    if (lookups.some((lookup) => lookup.status === 'fulfilled' && lookup.value)) {
+    const found = lookups.flatMap((lookup) => (lookup.status === 'fulfilled' ? lookup.value : []))
+    if (found.some(isDomainKey)) {
       return true
     }
     const failed = lookups.find((lookup): lookup is PromiseRejectedResult => lookup.status === 'rejected')
     if (failed) {
       throw failed.reason
     }
+    if (!found.includes(REFRESH_MARKER_KEY)) {
+      throw new Error(
+        `Restricted domains table has no refresh marker (${REFRESH_MARKER_KEY}). It may be empty or never refreshed.`
+      )
+    }
     return false
   }
 
+  // Every domain key in the table. The refresh marker is not a domain, so it
+  // is left out: the refresh never diffs, deletes or counts it.
   async allDomains(): Promise<string[]> {
     const domains: string[] = []
     let exclusiveStartKey: Record<string, unknown> | undefined
@@ -245,7 +282,7 @@ class RestrictedDomains {
           ...(exclusiveStartKey && { ExclusiveStartKey: exclusiveStartKey })
         })
       )
-      domains.push(...(page.Items ?? []).map((item) => item.DomainName as string))
+      domains.push(...(page.Items ?? []).map((item) => item.DomainName as string).filter(isDomainKey))
       exclusiveStartKey = page.LastEvaluatedKey
     } while (exclusiveStartKey)
     return domains
@@ -280,7 +317,8 @@ class RestrictedDomains {
   // throws when MMD fails or returns no domains. When the run would delete more
   // than the shrink limit (and allowLargeDelete is not set), it writes the adds,
   // skips every delete, then throws. Fails the run if a write is left
-  // unprocessed.
+  // unprocessed. Only a run that gets through all of that writes the refresh
+  // marker, last, even when nothing changed.
   async syncDomainsFromMmd(
     { allowLargeDelete = false }: { allowLargeDelete?: boolean } = {}
   ): Promise<{ added: number; removed: number }> {
@@ -315,6 +353,18 @@ class RestrictedDomains {
         `Restricted domains refresh stopped by the shrink guard: it would delete ${removed.length} of ${currentDomains.length} domains, over the limit of ${deleteLimit}. Applied ${added.length} adds and skipped all ${removed.length} deletes. To apply the deletes, invoke the job once with {"allowLargeDelete": true}.`
       )
     }
+
+    // Every write went through, so the table now holds exactly MMD's domains.
+    await refreshClient.send(
+      new PutCommand({
+        TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
+        Item: {
+          DomainName: REFRESH_MARKER_KEY,
+          LastSuccessAt: new Date().toISOString(),
+          DomainCount: mmdDomains.length
+        }
+      })
+    )
     return { added: added.length, removed: removed.length }
   }
 }
