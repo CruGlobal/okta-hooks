@@ -18,8 +18,10 @@ type DynamoDbRequest = DynamoDbPutRequest | DynamoDbDeleteRequest
 
 type MmdQueryable = Pick<Pool, 'query'>
 
+// No lower(): normalizeDomain does all case folding, so Postgres collation and
+// JavaScript's toLowerCase cannot disagree (Turkish İ, for example).
 const MMD_RESTRICTED_DOMAINS_QUERY =
-  'SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
+  'SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
 // DynamoDB's BatchWriteItem maximum.
 const BATCH_WRITE_SIZE = 25
 const UNPROCESSED_RETRY_WAITS_MS = [200, 400, 800]
@@ -61,10 +63,11 @@ const MAX_SKIPPED_VALUES_LOGGED = 50
 // Turns an MMD value or an email's domain into a table key, or null when it is
 // not a domain. The refresh and the sign-up lookup both use it, so the key a
 // lookup reads is always the key the refresh wrote. Removes format characters
-// anywhere, trims, strips one trailing dot and lowercases. Then it needs at
-// least two dot-separated labels and at most 253 characters.
+// anywhere, composes to NFC (so the NFD and NFC forms of an IDN match), trims,
+// strips one trailing dot and lowercases. Then it needs at least two
+// dot-separated labels and at most 253 characters.
 export const normalizeDomain = (value: string): string | null => {
-  const domain = value.replace(FORMAT_CHARACTERS, '').trim().replace(/\.$/, '').toLowerCase()
+  const domain = value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
   const labels = domain.split('.')
   if (domain.length > MAX_DOMAIN_LENGTH || labels.length < 2 || !labels.every((label) => DOMAIN_LABEL.test(label))) {
     return null

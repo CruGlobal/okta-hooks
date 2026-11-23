@@ -48,7 +48,9 @@ const sendClientConfigs = () =>
   mockDynamoDBSend.mock.contexts.map((documentClient) => (documentClient as { client: { config: unknown } }).client.config)
 
 const TABLE = 'restricted_domains_dynamodb'
-const MMD_QUERY = 'SELECT DISTINCT lower(domain) AS domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
+// No lower(): normalizeDomain does all case folding, so Postgres collation and
+// JavaScript cannot disagree.
+const MMD_QUERY = 'SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
 
 const put = (domain: string) => ({ PutRequest: { Item: { DomainName: domain } } })
 const del = (domain: string) => ({ DeleteRequest: { Key: { DomainName: domain } } })
@@ -123,6 +125,9 @@ describe('RestrictedDomains', () => {
       ['all of them at once', ' ​MATEUS28.COM. ', 'mateus28.com'],
       ['an IDN', 'café.fr', 'café.fr'],
       ['an uppercase IDN', 'CAFÉ.FR', 'café.fr'],
+      // u + combining diaeresis (NFD) and the precomposed ü (NFC) give one key.
+      ['an IDN in NFD form', 'bücher.de', 'bücher.de'],
+      ['an IDN in NFC form', 'bücher.de', 'bücher.de'],
       ['a punycode IDN', 'xn--caf-dma.fr', 'xn--caf-dma.fr'],
       // Ends in a vowel sign, a combining mark (category Mc).
       ['a Devanagari IDN', 'हिन्दी.भारत', 'हिन्दी.भारत'],
@@ -310,6 +315,13 @@ describe('RestrictedDomains', () => {
       mockTable([[]])
       await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
       expect(batchWrites()).toEqual([[put('dimension-x.ch')]])
+    })
+
+    it('writes one item for the NFD and NFC forms of an IDN', async () => {
+      mockMmd(['BÜCHER.DE', 'bücher.de'])
+      mockTable([[]])
+      await expect(sync()).resolves.toEqual({ added: 1, removed: 0 })
+      expect(batchWrites()).toEqual([[put('bücher.de')]])
     })
 
     it('replaces dirty keys an earlier refresh stored with their clean versions', async () => {
