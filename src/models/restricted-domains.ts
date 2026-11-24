@@ -1,6 +1,12 @@
 import { parseOneAddress, ParsedMailbox } from 'email-addresses'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, GetCommand, ScanCommand, BatchWriteCommand } from '@aws-sdk/lib-dynamodb'
+import {
+  DynamoDBDocumentClient,
+  BatchGetCommand,
+  ScanCommand,
+  BatchWriteCommand,
+  PutCommand
+} from '@aws-sdk/lib-dynamodb'
 import type { Pool } from 'pg'
 import { difference, chunk, uniq } from 'lodash'
 
@@ -16,6 +22,8 @@ interface DynamoDbDeleteRequest {
 
 type DynamoDbRequest = DynamoDbPutRequest | DynamoDbDeleteRequest
 
+type DomainKey = { DomainName: string }
+
 type MmdQueryable = Pick<Pool, 'query'>
 
 // No lower(): normalizeDomain does all case folding, so Postgres collation and
@@ -25,10 +33,25 @@ const MMD_RESTRICTED_DOMAINS_QUERY =
 // DynamoDB's BatchWriteItem maximum.
 const BATCH_WRITE_SIZE = 25
 const UNPROCESSED_RETRY_WAITS_MS = [200, 400, 800]
+// DynamoDB's BatchGetItem maximum.
+const BATCH_GET_SIZE = 100
+// Waits before the sign-up check resends keys DynamoDB left unprocessed. Kept
+// short: the whole check has to fit inside the hook's 1.5 s lookup timeout.
+const UNPROCESSED_KEYS_RETRY_WAITS_MS = [50, 100]
 // A refresh may delete at most this share of the table, or MIN_DELETE_LIMIT rows,
 // whichever is larger. More needs a person: invoke with {"allowLargeDelete": true}.
 const MAX_DELETE_PERCENT = 10
 const MIN_DELETE_LIMIT = 100
+
+// The key of the item the refresh writes after every successful run, with
+// LastSuccessAt and DomainCount. The sign-up check reads it in the same
+// BatchGet as the domains. When it is missing, the table may be empty or never
+// refreshed, so finding no domain proves nothing, and the check throws instead
+// of letting everyone sign up. normalizeDomain rejects '#', so this key can
+// never be a domain, and the refresh never diffs, counts or deletes it.
+export const REFRESH_MARKER_KEY = '#refresh'
+
+const isDomainKey = (key: string): boolean => key !== REFRESH_MARKER_KEY
 
 export class RestrictedDomainsSyncError extends Error {
   constructor(message: string) {
@@ -60,6 +83,16 @@ const DOMAIN_LABEL = /^[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]{0,61}[\p{L}\p{M}\p{N}])
 const MAX_DOMAIN_LENGTH = 253
 const MAX_SKIPPED_VALUES_LOGGED = 50
 
+// normalizeDomain's cleanup step, with no validation.
+const cleanDomain = (value: string): string =>
+  value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
+
+// normalizeDomain's validation step, for a value that is already clean.
+const isValidDomain = (domain: string): boolean => {
+  const labels = domain.split('.')
+  return domain.length <= MAX_DOMAIN_LENGTH && labels.length >= 2 && labels.every((label) => DOMAIN_LABEL.test(label))
+}
+
 // Turns an MMD value or an email's domain into a table key, or null when it is
 // not a domain. The refresh and the sign-up lookup both use it, so the key a
 // lookup reads is always the key the refresh wrote. Removes format characters
@@ -67,20 +100,49 @@ const MAX_SKIPPED_VALUES_LOGGED = 50
 // strips one trailing dot and lowercases. Then it needs at least two
 // dot-separated labels and at most 253 characters.
 export const normalizeDomain = (value: string): string | null => {
-  const domain = value.replace(FORMAT_CHARACTERS, '').normalize('NFC').trim().replace(/\.$/, '').toLowerCase()
-  const labels = domain.split('.')
-  if (domain.length > MAX_DOMAIN_LENGTH || labels.length < 2 || !labels.every((label) => DOMAIN_LABEL.test(label))) {
-    return null
+  const domain = cleanDomain(value)
+  return isValidDomain(domain) ? domain : null
+}
+
+// The keys a sign-up check looks up for an email's domain: the cleaned domain
+// and each parent domain, longest first, down to two labels, keeping only the
+// ones normalizeDomain accepts. fr.staff.example.org gives fr.staff.example.org,
+// staff.example.org and example.org.
+//
+// A label normalizeDomain rejects drops every candidate that contains it, but
+// the parents above it are still checked, so a bad sub-domain label cannot
+// hide a listed parent. foo_bar.cru.org gives only cru.org, and a.b_c.d.cru.org
+// gives d.cru.org and cru.org. With nothing left (a single label, a domain
+// literal, or a bad label in the last two), the list is empty.
+//
+// The top-level domain alone ("org", "uk") is never looked up: normalizeDomain
+// needs two labels, and the refresh stores only its output, so the table can
+// never hold a one-label key. Country domains need no special case. A listed
+// agape.org.uk blocks mail.agape.org.uk, and a listed org.uk would block every
+// domain under it, as any other two-label key would.
+const candidateDomains = (emailDomain: string): string[] => {
+  const labels = cleanDomain(emailDomain).split('.')
+  const candidates: string[] = []
+  // From the shortest suffix up, so it stops once one is too long to be a domain.
+  for (let i = labels.length - 2; i >= 0; i--) {
+    const suffix = labels.slice(i).join('.')
+    if (suffix.length > MAX_DOMAIN_LENGTH) {
+      break
+    }
+    if (isValidDomain(suffix)) {
+      candidates.unshift(suffix)
+    }
   }
-  return domain
+  return candidates
 }
 
 // Both clients are built once per container.
 //
 // The sign-up check has to answer or fail well inside Okta's 3 s hook limit:
-// each attempt gives up after 600 ms and there is one retry, so a hung or
-// unreachable DynamoDB fails in about 1.3 s. A throttled first attempt backs off
-// up to 1 s before the retry. Without throwOnRequestTimeout the SDK only logs a
+// each attempt gets 500 ms to connect and 600 ms for the request, and there is
+// one retry, so the client alone can take over 2 s. A throttled first attempt
+// backs off up to 1 s before the retry. The hook's 1.5 s lookup timeout
+// (CHECK_TIMEOUT_MS) is what bounds the answer. Without throwOnRequestTimeout the SDK only logs a
 // warning at requestTimeout and keeps waiting.
 const lookupClient = DynamoDBDocumentClient.from(
   new DynamoDBClient({
@@ -120,6 +182,47 @@ const batchWrite = async (requests: DynamoDbRequest[]): Promise<void> => {
   }
 }
 
+// Sends one BatchGet of at most 100 keys. Returns the keys found in the table
+// and the keys DynamoDB did not process.
+const sendBatchGet = async (
+  tableName: string,
+  keys: DomainKey[]
+): Promise<{ found: string[]; unprocessed: DomainKey[] }> => {
+  const result = await lookupClient.send(
+    new BatchGetCommand({ RequestItems: { [tableName]: { Keys: keys, ProjectionExpression: 'DomainName' } } })
+  )
+  return {
+    found: (result.Responses?.[tableName] ?? []).map((item) => item.DomainName as string),
+    unprocessed: (result.UnprocessedKeys?.[tableName]?.Keys ?? []) as DomainKey[]
+  }
+}
+
+// Which of these keys (at most 100: domains, plus the refresh marker in the
+// first request) are in the table. A domain hit decides at once, even when
+// DynamoDB left other keys unprocessed. Finding only the marker does not,
+// because an unprocessed key may be a listed domain. Otherwise only the
+// unprocessed keys are sent again, after 50 ms and then 100 ms, and keys still
+// unprocessed after that make it throw. A key DynamoDB did not read is never
+// taken as "not listed" or "no marker".
+const findKeys = async (tableName: string, names: string[]): Promise<string[]> => {
+  const found: string[] = []
+  let keys: DomainKey[] = names.map((DomainName) => ({ DomainName }))
+  for (let retry = 0; ; retry++) {
+    const { found: foundNow, unprocessed } = await sendBatchGet(tableName, keys)
+    found.push(...foundNow)
+    if (found.some(isDomainKey) || unprocessed.length === 0) {
+      return found
+    }
+    if (retry === UNPROCESSED_KEYS_RETRY_WAITS_MS.length) {
+      throw new Error(
+        `DynamoDB left ${unprocessed.length} restricted-domain lookups unprocessed after ${UNPROCESSED_KEYS_RETRY_WAITS_MS.length} retries.`
+      )
+    }
+    await sleep(UNPROCESSED_KEYS_RETRY_WAITS_MS[retry])
+    keys = unprocessed
+  }
+}
+
 // MMD (`Domains.is_idm_self_service_prevention`) is the source of truth. The
 // scheduled job copies it into the DynamoDB table (syncDomainsFromMmd), and the
 // registration hook reads only that copy (isRestricted), so an MMD outage never
@@ -133,27 +236,69 @@ class RestrictedDomains {
     this.mmd = mmd
   }
 
-  // Exact match on the normalized domain; no subdomain or parent matching. An
-  // address with no domain, or one normalizeDomain rejects, is not restricted
-  // and is never looked up: the refresh never stores such a key. Throws on any
-  // DynamoDB error, which the registration hook turns into a DENY.
+  // Restricted when the email's normalized domain, or any parent domain of it,
+  // is a key in the table. A listed root domain blocks itself and all its
+  // sub-domains: cru.org blocks mail.cru.org and fr.mail.cru.org. A listed
+  // sub-domain blocks itself and its own sub-domains, but not its root or the
+  // root's other sub-domains: staff.example.org blocks fr.staff.example.org, but
+  // not example.org or students.example.org. Keys match exactly, so notcru.org
+  // and cru.org.example.com never match cru.org. (Rule from May Workman's "MMD
+  // development notes", approved by Jon Watson 2026-11-23.)
+  //
+  // Every candidate goes in one BatchGet, with the refresh marker. BatchGetItem
+  // takes at most 100 keys, and a 253-character domain can have 126 candidates,
+  // so a longer list is split into requests of 100 sent in parallel. The marker
+  // rides in the first request only. The decision:
+  // - A domain found in any request: restricted, even if another request failed
+  //   or the marker is missing.
+  // - Otherwise, any failed request (an error, or keys still unprocessed after
+  //   the retries): throw.
+  // - Otherwise, no marker: throw. The table may be empty or never refreshed,
+  //   so finding no domain proves nothing.
+  // - Otherwise: not restricted.
+  // The registration hook turns any throw into the "try again" DENY. When the
+  // whole domain fails normalizeDomain, its valid parents are still checked
+  // (see candidateDomains). An address with no domain, or with no valid
+  // candidate left, is not restricted and is never looked up: the refresh never
+  // stores such a key.
+  //
+  // Timing: one BatchGet normally takes a few ms. UnprocessedKeys retries add
+  // at most 150 ms of waiting and two more requests. Each request is bounded by
+  // the lookup client's timeouts, and the hook's 1.5 s
+  // lookup timeout (CHECK_TIMEOUT_MS) caps the whole check, retries included.
+  // So a slow DynamoDB still gets the "try again" DENY in time.
   static async isRestricted(emailAddress: string): Promise<boolean> {
     const parsedAddress = parseOneAddress(emailAddress) as ParsedMailbox | null
-    const domain = parsedAddress?.domain ? normalizeDomain(parsedAddress.domain) : null
+    const candidates = parsedAddress?.domain ? candidateDomains(parsedAddress.domain) : []
 
-    if (!domain) {
+    if (candidates.length === 0) {
       return false
     }
 
-    const result = await lookupClient.send(
-      new GetCommand({
-        TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
-        Key: { DomainName: domain }
-      })
+    const tableName = process.env.DYNAMODB_RESTRICTED_DOMAINS!
+    // The marker goes first, so it is always in the first request.
+    const lookups = await Promise.allSettled(
+      chunk([REFRESH_MARKER_KEY, ...candidates], BATCH_GET_SIZE)
+        .map((keys) => findKeys(tableName, keys))
     )
-    return result.Item !== undefined
+    const found = lookups.flatMap((lookup) => (lookup.status === 'fulfilled' ? lookup.value : []))
+    if (found.some(isDomainKey)) {
+      return true
+    }
+    const failed = lookups.find((lookup): lookup is PromiseRejectedResult => lookup.status === 'rejected')
+    if (failed) {
+      throw failed.reason
+    }
+    if (!found.includes(REFRESH_MARKER_KEY)) {
+      throw new Error(
+        `Restricted domains table has no refresh marker (${REFRESH_MARKER_KEY}). It may be empty or never refreshed.`
+      )
+    }
+    return false
   }
 
+  // Every domain key in the table. The refresh marker is not a domain, so it
+  // is left out: the refresh never diffs, deletes or counts it.
   async allDomains(): Promise<string[]> {
     const domains: string[] = []
     let exclusiveStartKey: Record<string, unknown> | undefined
@@ -164,7 +309,7 @@ class RestrictedDomains {
           ...(exclusiveStartKey && { ExclusiveStartKey: exclusiveStartKey })
         })
       )
-      domains.push(...(page.Items ?? []).map((item) => item.DomainName as string))
+      domains.push(...(page.Items ?? []).map((item) => item.DomainName as string).filter(isDomainKey))
       exclusiveStartKey = page.LastEvaluatedKey
     } while (exclusiveStartKey)
     return domains
@@ -199,7 +344,8 @@ class RestrictedDomains {
   // throws when MMD fails or returns no domains. When the run would delete more
   // than the shrink limit (and allowLargeDelete is not set), it writes the adds,
   // skips every delete, then throws. Fails the run if a write is left
-  // unprocessed.
+  // unprocessed. Only a run that gets through all of that writes the refresh
+  // marker, last, even when nothing changed.
   async syncDomainsFromMmd(
     { allowLargeDelete = false }: { allowLargeDelete?: boolean } = {}
   ): Promise<{ added: number; removed: number }> {
@@ -234,6 +380,18 @@ class RestrictedDomains {
         `Restricted domains refresh stopped by the shrink guard: it would delete ${removed.length} of ${currentDomains.length} domains, over the limit of ${deleteLimit}. Applied ${added.length} adds and skipped all ${removed.length} deletes. To apply the deletes, invoke the job once with {"allowLargeDelete": true}.`
       )
     }
+
+    // Every write went through, so the table now holds exactly MMD's domains.
+    await refreshClient.send(
+      new PutCommand({
+        TableName: process.env.DYNAMODB_RESTRICTED_DOMAINS!,
+        Item: {
+          DomainName: REFRESH_MARKER_KEY,
+          LastSuccessAt: new Date().toISOString(),
+          DomainCount: mmdDomains.length
+        }
+      })
+    )
     return { added: added.length, removed: removed.length }
   }
 }

@@ -3,12 +3,31 @@ import type { ALBResult } from 'aws-lambda'
 import { handler, CHECK_TIMEOUT_MS, ROLLBAR_WAIT_MS } from '@/handlers/alb/registration.js'
 import GUID from '@/models/guid.js'
 import rollbar from '@/config/rollbar.js'
-import RestrictedDomains from '@/models/restricted-domains.js'
+import RestrictedDomains, { REFRESH_MARKER_KEY } from '@/models/restricted-domains.js'
 import { REDACTED } from '@/utils/redact-error.js'
+import { mockDynamoDBSend } from '../../mocks/aws-sdk-v3.js'
 
 import registrationEvent from '../../fixtures/alb/inline-registration.json'
 
 vi.mock('@/config/rollbar.js')
+
+// Most tests stub RestrictedDomains.isRestricted. The ones under "with the real
+// lookup" run it against this mocked DynamoDB.
+vi.mock('@aws-sdk/client-dynamodb', async () => {
+  const mock = await import('../../mocks/aws-sdk-v3.js')
+  return { DynamoDBClient: mock.DynamoDBClient }
+})
+
+vi.mock('@aws-sdk/lib-dynamodb', async () => {
+  const mock = await import('../../mocks/aws-sdk-v3.js')
+  return {
+    DynamoDBDocumentClient: mock.DynamoDBDocumentClient,
+    BatchGetCommand: mock.BatchGetCommand,
+    ScanCommand: mock.ScanCommand,
+    BatchWriteCommand: mock.BatchWriteCommand,
+    PutCommand: mock.PutCommand
+  }
+})
 
 const GUID_VALUE = '00000000-0000-0000-0000-000000000000'
 const ALLOW = { type: 'com.okta.action.update', value: { registration: 'ALLOW' } }
@@ -18,6 +37,11 @@ const TRY_AGAIN_ERROR = "We couldn't finish creating your account. Please try ag
 const FR_TRY_AGAIN_ERROR = "Nous n'avons pas pu terminer la création de votre compte. Veuillez réessayer dans quelques minutes. Si le problème persiste, contactez help@checkmyokta.com."
 
 const withLocale = (locale: string) => ({ ...registrationEvent, headers: { ...registrationEvent.headers, 'x-cru-locale': locale } })
+const withLogin = (login: string) => {
+  const body = JSON.parse(registrationEvent.body)
+  body.data.userProfile = { ...body.data.userProfile, login, email: login }
+  return { ...registrationEvent, body: JSON.stringify(body) }
+}
 const bodyOf = (response: ALBResult) => JSON.parse(response.body ?? '')
 const never = () => new Promise<never>(() => {})
 const tryAgainBody = (errorSummary = TRY_AGAIN_ERROR) => ({
@@ -234,7 +258,7 @@ describe('registration hook', () => {
     it('should log one structured line for the monitor, with credentials redacted', async () => {
       // Credentials ride on SDK errors as properties (request headers, config), the
       // shape redactError strips. The message itself carries none.
-      const error = Object.assign(new Error('GetItem failed'), {
+      const error = Object.assign(new Error('BatchGetItem failed'), {
         password: 'secret',
         $response: { headers: { authorization: 'AWS4-HMAC-SHA256 Credential=secret' } }
       })
@@ -244,7 +268,7 @@ describe('registration hook', () => {
       expect(console.error).toHaveBeenCalledTimes(1)
       const line = vi.mocked(console.error).mock.calls[0][0] as string
       expect(JSON.parse(line))
-        .toStrictEqual({ event: 'restricted_domain_check_failed', name: 'Error', error: 'GetItem failed' })
+        .toStrictEqual({ event: 'restricted_domain_check_failed', name: 'Error', error: 'BatchGetItem failed' })
       expect(line).not.toContain('secret')
 
       const reported = vi.mocked(rollbar.error).mock.calls[0][1] as unknown as typeof error
@@ -340,6 +364,104 @@ describe('registration hook', () => {
       vi.mocked(rollbar.error).mockResolvedValue(undefined)
       await handler(registrationEvent as any)
       expect(vi.getTimerCount()).toBe(0)
+    })
+  })
+
+  describe('with the real lookup', () => {
+    type BatchGetRequest = { input: { RequestItems: Record<string, { Keys: { DomainName: string }[] }> } }
+    const TABLE = 'restricted_domains_dynamodb'
+
+    // Serves BatchGets from a table holding `listed`, plus the refresh marker
+    // unless `marker` is false. With neverProcess set, DynamoDB leaves every key
+    // unprocessed on every call.
+    const mockTable = (listed: string[], { neverProcess = false, marker = true } = {}) => {
+      const table = marker ? [REFRESH_MARKER_KEY, ...listed] : listed
+      mockDynamoDBSend.mockImplementation(async (command: BatchGetRequest) => {
+        const requested = command.input.RequestItems[TABLE].Keys
+        if (neverProcess) {
+          return { Responses: { [TABLE]: [] }, UnprocessedKeys: { [TABLE]: { Keys: requested } } }
+        }
+        return { Responses: { [TABLE]: requested.filter(({ DomainName }) => table.includes(DomainName)) } }
+      })
+    }
+
+    beforeEach(() => {
+      mockDynamoDBSend.mockReset()
+    })
+
+    it('should deny a sub-domain of a listed domain with the restricted domain error', async () => {
+      mockTable(['cru.org'])
+      const response = await handler(withLogin('jane.doe@mail.cru.org') as any)
+      expect(response.statusCode).toBe(200)
+      expect(bodyOf(response)).toStrictEqual({
+        commands: [DENY],
+        error: {
+          errorSummary: 'Errors were found in the user profile',
+          errorCauses: [{
+            locationType: 'body',
+            location: 'data.userProfile.login',
+            domain: 'end-user',
+            errorSummary: RESTRICTED_ERROR,
+            reason: 'RESTRICTED_EMAIL_DOMAIN'
+          }]
+        }
+      })
+    })
+
+    it('should allow the root of a listed sub-domain', async () => {
+      vi.spyOn(GUID, 'create').mockReturnValue(GUID_VALUE)
+      mockTable(['staff.example.org'])
+      const response = await handler(withLogin('jane.doe@example.org') as any)
+      expect(bodyOf(response).commands[0]).toStrictEqual(ALLOW)
+    })
+
+    it('should deny with the try again error, inside the lookup timeout, when keys stay unprocessed', async () => {
+      vi.useFakeTimers()
+      mockTable(['cru.org'], { neverProcess: true })
+      const { state, result } = startHandler(withLogin('jane.doe@mail.cru.org'))
+      // The retries give up on their own, before the hook's lookup timeout.
+      await vi.advanceTimersByTimeAsync(CHECK_TIMEOUT_MS - 1)
+      expect(state.settled).toBe(true)
+      expect(bodyOf(await result)).toStrictEqual(tryAgainBody())
+      expect(JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string)).toStrictEqual({
+        event: 'restricted_domain_check_failed',
+        name: 'Error',
+        error: 'DynamoDB left 3 restricted-domain lookups unprocessed after 2 retries.'
+      })
+    })
+
+    // An empty or never-refreshed table has no marker. Allowing everyone then
+    // would let restricted domains sign up, so the hook refuses and alerts.
+    it('should deny with the try again error and log the failure when the table has no refresh marker', async () => {
+      vi.spyOn(GUID, 'create').mockReturnValue(GUID_VALUE)
+      mockTable([], { marker: false })
+      const event = withLogin('jane.doe@example.org')
+      const response = await handler(event as any)
+      expect(response.statusCode).toBe(200)
+      expect(bodyOf(response)).toStrictEqual(tryAgainBody())
+      expect(GUID.create).not.toHaveBeenCalled()
+      expect(console.error).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string)).toStrictEqual({
+        event: 'restricted_domain_check_failed',
+        name: 'Error',
+        error: 'Restricted domains table has no refresh marker (#refresh). It may be empty or never refreshed.'
+      })
+      expect(rollbar.error)
+        .toHaveBeenCalledWith('registration hook Error', expect.any(Error), { lambdaEvent: event })
+    })
+
+    it('should still deny a listed domain when the table has no refresh marker', async () => {
+      mockTable(['cru.org'], { marker: false })
+      const response = await handler(withLogin('jane.doe@mail.cru.org') as any)
+      expect(bodyOf(response).commands).toStrictEqual([DENY])
+      expect(bodyOf(response).error.errorCauses[0].reason).toBe('RESTRICTED_EMAIL_DOMAIN')
+    })
+
+    it('should deny a sub-domain with an invalid label when its parent is listed', async () => {
+      mockTable(['cru.org'])
+      const response = await handler(withLogin('jane.doe@foo_bar.cru.org') as any)
+      expect(bodyOf(response).commands).toStrictEqual([DENY])
+      expect(bodyOf(response).error.errorCauses[0].reason).toBe('RESTRICTED_EMAIL_DOMAIN')
     })
   })
 

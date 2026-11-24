@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import RestrictedDomains, { RestrictedDomainsSyncError, normalizeDomain } from '@/models/restricted-domains.js'
+import RestrictedDomains, {
+  RestrictedDomainsSyncError,
+  normalizeDomain,
+  REFRESH_MARKER_KEY
+} from '@/models/restricted-domains.js'
 import {
   mockDynamoDBSend,
   DynamoDBClient,
-  GetCommand,
+  BatchGetCommand,
   ScanCommand,
-  BatchWriteCommand
+  BatchWriteCommand,
+  PutCommand
 } from '../mocks/aws-sdk-v3.js'
 
 // The registration bundle must not carry pg, so the model must never load the
@@ -26,9 +31,10 @@ vi.mock('@aws-sdk/lib-dynamodb', async () => {
   const mock = await import('../mocks/aws-sdk-v3.js')
   return {
     DynamoDBDocumentClient: mock.DynamoDBDocumentClient,
-    GetCommand: mock.GetCommand,
+    BatchGetCommand: mock.BatchGetCommand,
     ScanCommand: mock.ScanCommand,
-    BatchWriteCommand: mock.BatchWriteCommand
+    BatchWriteCommand: mock.BatchWriteCommand,
+    PutCommand: mock.PutCommand
   }
 })
 
@@ -48,6 +54,7 @@ const sendClientConfigs = () =>
   mockDynamoDBSend.mock.contexts.map((documentClient) => (documentClient as { client: { config: unknown } }).client.config)
 
 const TABLE = 'restricted_domains_dynamodb'
+const MARKER = '#refresh'
 // No lower(): normalizeDomain does all case folding, so Postgres collation and
 // JavaScript cannot disagree.
 const MMD_QUERY = 'SELECT DISTINCT domain FROM "Domains" WHERE is_idm_self_service_prevention = true'
@@ -78,6 +85,8 @@ const mockTable = (scanPages: string[][], batchWriteReply: BatchWriteReply = () 
       }
       case 'BatchWriteCommand':
         return batchWriteReply(command.input as BatchWriteInput)
+      case 'PutCommand':
+        return {}
       default:
         throw new Error(`unexpected command ${command._type}`)
     }
@@ -87,8 +96,51 @@ const mockTable = (scanPages: string[][], batchWriteReply: BatchWriteReply = () 
 const batchWrites = () =>
   vi.mocked(BatchWriteCommand).mock.calls.map(([input]) => (input as BatchWriteInput).RequestItems[TABLE])
 
+// The input of each refresh marker Put, in call order.
+const markerPuts = () => vi.mocked(PutCommand).mock.calls.map(([input]) => input)
+
+// The type of each command sent, in call order.
+const sentCommands = () => mockDynamoDBSend.mock.calls.map(([command]) => (command as { _type: string })._type)
+
 const sync = (options?: { allowLargeDelete?: boolean }) =>
   new RestrictedDomains({ query: mmd.query } as never).syncDomainsFromMmd(options)
+
+type DomainKey = { DomainName: string }
+type BatchGetInput = { RequestItems: Record<string, { Keys: DomainKey[], ProjectionExpression: string }> }
+// Picks the domains DynamoDB leaves unprocessed on a call (counted from 0).
+type LeaveUnprocessed = (requested: string[], call: number) => string[]
+
+const keys = (...domainNames: string[]) => domainNames.map((DomainName) => ({ DomainName }))
+
+// Serves BatchGets from a table holding `listed`, the way DynamoDB does. The
+// table also holds the refresh marker unless `marker` is false. Each reply
+// returns the processed keys that are in the table. Keys it leaves unprocessed
+// come back under UnprocessedKeys and never in Responses.
+const mockLookupTable = (
+  listed: string[],
+  { leaveUnprocessed = () => [], marker = true }: { leaveUnprocessed?: LeaveUnprocessed, marker?: boolean } = {}
+) => {
+  const table = new Set(marker ? [MARKER, ...listed] : listed)
+  let call = 0
+  mockDynamoDBSend.mockImplementation(async (command: { _type: string, input: unknown }) => {
+    if (command._type !== 'BatchGetCommand') {
+      throw new Error(`unexpected command ${command._type}`)
+    }
+    const request = (command.input as BatchGetInput).RequestItems[TABLE]
+    const requested = request.Keys.map(({ DomainName }) => DomainName)
+    const unprocessed = leaveUnprocessed(requested, call++)
+    const processed = requested.filter((domain) => !unprocessed.includes(domain))
+    return {
+      Responses: { [TABLE]: keys(...processed.filter((domain) => table.has(domain))) },
+      UnprocessedKeys: unprocessed.length > 0 ? { [TABLE]: { ...request, Keys: keys(...unprocessed) } } : {}
+    }
+  })
+}
+
+// The domains in each BatchGet, in call order.
+const batchGetKeys = () =>
+  vi.mocked(BatchGetCommand).mock.calls.map(([input]) =>
+    (input as BatchGetInput).RequestItems[TABLE].Keys.map(({ DomainName }) => DomainName))
 
 describe('RestrictedDomains', () => {
   beforeEach(() => {
@@ -161,6 +213,11 @@ describe('RestrictedDomains', () => {
     ])('rejects %s', (_, value) => {
       expect(normalizeDomain(value)).toBeNull()
     })
+
+    it('rejects the refresh marker key, so it can never be a domain key', () => {
+      expect(REFRESH_MARKER_KEY).toBe(MARKER)
+      expect(normalizeDomain(MARKER)).toBeNull()
+    })
   })
 
   describe('static isRestricted(emailAddress)', () => {
@@ -178,24 +235,111 @@ describe('RestrictedDomains', () => {
       mockFetch.mockRestore()
     })
 
-    it('is true when the lowercased domain is in the table', async () => {
-      mockDynamoDBSend.mockResolvedValue({ Item: { DomainName: 'blocked.org' } })
-      const result = await RestrictedDomains.isRestricted('a@Blocked.ORG')
-      expect(result).toBe(true)
-      expect(GetCommand).toHaveBeenCalledWith({ TableName: TABLE, Key: { DomainName: 'blocked.org' } })
+    // The approved rule (May Workman's MMD development notes, approved by Jon
+    // Watson 2026-11-23): blocked when the email's domain, or any parent domain
+    // of it, is a key in the table.
+    it.each([
+      // A listed root domain blocks itself and all its sub-domains.
+      ['cru.org', 'cru.org', true],
+      ['cru.org', 'mail.cru.org', true],
+      ['cru.org', 'fr.mail.cru.org', true],
+      // Keys match exactly, never as a suffix or a prefix.
+      ['cru.org', 'notcru.org', false],
+      ['cru.org', 'cru.org.example.com', false],
+      // A listed sub-domain blocks itself and its own sub-domains, but not its
+      // root or the root's other sub-domains.
+      ['staff.example.org', 'staff.example.org', true],
+      ['staff.example.org', 'fr.staff.example.org', true],
+      ['staff.example.org', 'example.org', false],
+      ['staff.example.org', 'students.example.org', false],
+      // Country domains, where the name sits under two labels.
+      ['agape.org.uk', 'agape.org.uk', true],
+      ['agape.org.uk', 'mail.agape.org.uk', true],
+      ['agape.org.uk', 'other.org.uk', false],
+      ['ccci.org.za', 'x.ccci.org.za', true],
+      // org.uk is a two-label key like any other, so listing it blocks all under it.
+      ['org.uk', 'mail.agape.org.uk', true]
+    ])('with %s listed, user@%s is restricted: %s', async (listed, domain, expected) => {
+      mockLookupTable([listed])
+      await expect(RestrictedDomains.isRestricted(`user@${domain}`)).resolves.toBe(expected)
+    })
+
+    it('looks up the refresh marker, the domain and each parent down to two labels in one BatchGet', async () => {
+      mockLookupTable([])
+      await expect(RestrictedDomains.isRestricted('user@fr.staff.example.org')).resolves.toBe(false)
       expect(mockDynamoDBSend).toHaveBeenCalledTimes(1)
+      expect(BatchGetCommand).toHaveBeenCalledTimes(1)
+      expect(BatchGetCommand).toHaveBeenCalledWith({
+        RequestItems: {
+          [TABLE]: {
+            Keys: keys(MARKER, 'fr.staff.example.org', 'staff.example.org', 'example.org'),
+            ProjectionExpression: 'DomainName'
+          }
+        }
+      })
+      // The top-level domain alone is never a key, so it is never looked up.
+      expect(batchGetKeys().flat()).not.toContain('org')
+    })
+
+    // A trailing dot never gets here: the email parser rejects 'user@cru.org.'.
+    it.each([
+      ['uppercase', 'user@FR.Staff.Example.ORG'],
+      ['a zero-width space', 'user@​fr.staff.example.org']
+    ])('builds the candidates from the normalized domain (%s)', async (_, email) => {
+      mockLookupTable([])
+      await RestrictedDomains.isRestricted(email)
+      expect(batchGetKeys()).toEqual([[MARKER, 'fr.staff.example.org', 'staff.example.org', 'example.org']])
+    })
+
+    it('is true when the lowercased domain is in the table, and looks up only that key and the marker', async () => {
+      mockLookupTable(['blocked.org'])
+      await expect(RestrictedDomains.isRestricted('a@Blocked.ORG')).resolves.toBe(true)
+      expect(batchGetKeys()).toEqual([[MARKER, 'blocked.org']])
+    })
+
+    // The refresh writes the marker after every successful run. Without it the
+    // table may be empty, so no domain found proves nothing.
+    describe('refresh marker', () => {
+      it('is false when the marker is there and no domain is listed', async () => {
+        mockLookupTable(['other.org'])
+        await expect(RestrictedDomains.isRestricted('user@mail.example.org')).resolves.toBe(false)
+      })
+
+      it('throws when the marker is missing and no domain is listed', async () => {
+        mockLookupTable(['other.org'], { marker: false })
+        await expect(RestrictedDomains.isRestricted('user@mail.example.org')).rejects.toThrow(
+          'Restricted domains table has no refresh marker (#refresh). It may be empty or never refreshed.'
+        )
+      })
+
+      it('is true when a domain is listed, even if the marker is missing', async () => {
+        mockLookupTable(['example.org'], { marker: false })
+        await expect(RestrictedDomains.isRestricted('user@mail.example.org')).resolves.toBe(true)
+      })
+
+      it('never counts the marker as a domain hit', async () => {
+        // Only the marker is in the table, and the reply finds it.
+        mockLookupTable([])
+        await expect(RestrictedDomains.isRestricted('user@example.org')).resolves.toBe(false)
+        expect(mockDynamoDBSend).toHaveBeenCalledTimes(1)
+      })
     })
 
     it('reads through the lookup client, which gives up fast', async () => {
-      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
+      mockLookupTable([])
       await RestrictedDomains.isRestricted('a@open.org')
       expect(sendClientConfigs()).toEqual([LOOKUP_CLIENT_CONFIG])
     })
 
     it('is false when the domain is not in the table', async () => {
-      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
-      const result = await RestrictedDomains.isRestricted('a@open.org')
-      expect(result).toBe(false)
+      mockLookupTable(['blocked.org'])
+      await expect(RestrictedDomains.isRestricted('a@open.org')).resolves.toBe(false)
+    })
+
+    it('treats a BatchGet reply without Responses or UnprocessedKeys as finding nothing, not even the marker', async () => {
+      mockDynamoDBSend.mockResolvedValue({})
+      await expect(RestrictedDomains.isRestricted('a@mail.open.org')).rejects.toThrow('no refresh marker')
+      expect(mockDynamoDBSend).toHaveBeenCalledTimes(1)
     })
 
     it('is false for an invalid email address without reading DynamoDB', async () => {
@@ -206,16 +350,61 @@ describe('RestrictedDomains', () => {
 
     it('matches a row the refresh stored from a dirty MMD value', async () => {
       // MMD holds '​dimension-x.ch'; the refresh stores 'dimension-x.ch'.
-      mockDynamoDBSend.mockResolvedValue({ Item: { DomainName: 'dimension-x.ch' } })
-      const result = await RestrictedDomains.isRestricted('user@Dimension-X.CH')
-      expect(result).toBe(true)
-      expect(GetCommand).toHaveBeenCalledWith({ TableName: TABLE, Key: { DomainName: 'dimension-x.ch' } })
+      mockLookupTable(['dimension-x.ch'])
+      await expect(RestrictedDomains.isRestricted('user@Dimension-X.CH')).resolves.toBe(true)
+      expect(batchGetKeys()).toEqual([[MARKER, 'dimension-x.ch']])
     })
 
+    // A label normalizeDomain rejects drops every candidate that contains it, but
+    // the parents above it are still checked. Otherwise a bad sub-domain label
+    // would hide a listed parent. The email parser passes all of these through.
+    describe('a domain with an invalid label', () => {
+      it.each([
+        ['an underscore', 'foo_bar.cru.org', ['cru.org']],
+        ['an underscore deeper down', 'a.b_c.d.cru.org', ['d.cru.org', 'cru.org']],
+        ['a hyphen-led label', '-bad.cru.org', ['cru.org']],
+        ['a hyphen-ended label', 'bad-.cru.org', ['cru.org']],
+        ['a 64-character label', `${'a'.repeat(64)}.cru.org`, ['cru.org']]
+      ])('is blocked when a parent is listed (%s)', async (_, domain, candidates) => {
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted(`jane@${domain}`)).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[MARKER, ...candidates]])
+      })
+
+      it('is allowed after a lookup of only the valid parents when none is listed', async () => {
+        mockLookupTable(['other.org'])
+        await expect(RestrictedDomains.isRestricted('jane@foo_bar.example.org')).resolves.toBe(false)
+        expect(batchGetKeys()).toEqual([[MARKER, 'example.org']])
+      })
+
+      it('cleans the domain the way normalizeDomain does before picking the parents', async () => {
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted('jane@​FOO_BAR.Cru.ORG')).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[MARKER, 'cru.org']])
+      })
+
+      it('checks the parents that fit when the whole domain is over 253 characters', async () => {
+        const label = 'a'.repeat(63)
+        const domain = `${label}.${label}.${label}.${label}.cru.org`
+        expect(domain.length).toBeGreaterThan(253)
+        mockLookupTable(['cru.org'])
+        await expect(RestrictedDomains.isRestricted(`jane@${domain}`)).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([[
+          MARKER,
+          `${label}.${label}.${label}.cru.org`,
+          `${label}.${label}.cru.org`,
+          `${label}.cru.org`,
+          'cru.org'
+        ]])
+      })
+    })
+
+    // No candidate is left, so there is nothing to look up.
     it.each([
       ['a single-label domain', 'user@localhost'],
-      ['a hyphen-led label', 'user@-bad.org'],
-      ['an underscore', 'user@exa_mple.org'],
+      ['a hyphen-led label in the only two-label suffix', 'user@-bad.org'],
+      ['an underscore in the only two-label suffix', 'user@exa_mple.org'],
+      ['an invalid top-level label', 'user@cru.org_'],
       ['a domain literal', 'user@[192.0.2.1]']
     ])('is false for %s without reading DynamoDB', async (_, email) => {
       const result = await RestrictedDomains.isRestricted(email)
@@ -230,11 +419,171 @@ describe('RestrictedDomains', () => {
     })
 
     it('never queries MMD or the flag service', async () => {
-      mockDynamoDBSend.mockResolvedValue({ Item: undefined })
+      mockLookupTable([])
       await RestrictedDomains.isRestricted('a@open.org')
       expect(mmd.query).not.toHaveBeenCalled()
       expect(mmd.poolModuleLoaded).toBe(false)
       expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    // An unprocessed key was never read, so it is never taken as "not listed",
+    // and an unprocessed marker is never taken as "no marker".
+    describe('UnprocessedKeys', () => {
+      const EMAIL = 'user@fr.staff.example.org'
+      const KEYS = [MARKER, 'fr.staff.example.org', 'staff.example.org', 'example.org']
+      let setTimeoutSpy: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        vi.useFakeTimers()
+        setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+      })
+
+      afterEach(() => {
+        setTimeoutSpy.mockRestore()
+        vi.useRealTimers()
+      })
+
+      const waits = () => setTimeoutSpy.mock.calls.map(([, ms]) => ms)
+
+      it('is true at once when a domain is found, even with other keys unprocessed', async () => {
+        mockLookupTable(['example.org'], {
+          leaveUnprocessed: (_, call) => (call === 0 ? [MARKER, 'fr.staff.example.org'] : [])
+        })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([KEYS])
+        expect(waits()).toEqual([])
+      })
+
+      it('resends only the unprocessed keys after 50 ms, and a hit then is true', async () => {
+        mockLookupTable(['example.org'], { leaveUnprocessed: (_, call) => (call === 0 ? ['example.org'] : []) })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toBe(true)
+        expect(batchGetKeys()).toEqual([KEYS, ['example.org']])
+        expect(waits()).toEqual([50])
+      })
+
+      it('still resends unprocessed domains when the marker is found, and is false when none is listed', async () => {
+        mockLookupTable(['other.org'], {
+          leaveUnprocessed: (_, call) => (call === 0 ? ['staff.example.org', 'example.org'] : [])
+        })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toBe(false)
+        expect(batchGetKeys()).toEqual([KEYS, ['staff.example.org', 'example.org']])
+        expect(waits()).toEqual([50])
+      })
+
+      it('is false when the marker is unprocessed, then read on a retry', async () => {
+        mockLookupTable([], { leaveUnprocessed: (_, call) => (call === 0 ? [MARKER] : []) })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toBe(false)
+        expect(batchGetKeys()).toEqual([KEYS, [MARKER]])
+        expect(waits()).toEqual([50])
+      })
+
+      it('counts a hit on the second and last retry', async () => {
+        mockLookupTable(['example.org'], { leaveUnprocessed: (requested, call) => (call < 2 ? requested : []) })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        await vi.runAllTimersAsync()
+        await expect(run).resolves.toBe(true)
+        expect(BatchGetCommand).toHaveBeenCalledTimes(3)
+        expect(waits()).toEqual([50, 100])
+      })
+
+      it('throws when keys are still unprocessed after 2 retries', async () => {
+        // example.org is listed, but DynamoDB never reads it.
+        mockLookupTable(['example.org'], { leaveUnprocessed: (requested) => requested })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        const assertion = expect(run).rejects.toThrow('4 restricted-domain lookups unprocessed after 2 retries')
+        await vi.runAllTimersAsync()
+        await assertion
+        expect(batchGetKeys()).toEqual([KEYS, KEYS, KEYS])
+        expect(waits()).toEqual([50, 100])
+      })
+
+      it('throws the unprocessed error, not the missing-marker error, when only the marker stays unprocessed', async () => {
+        mockLookupTable([], { leaveUnprocessed: (requested) => requested.filter((key) => key === MARKER) })
+        const run = RestrictedDomains.isRestricted(EMAIL)
+        const assertion = expect(run).rejects.toThrow('1 restricted-domain lookups unprocessed after 2 retries')
+        await vi.runAllTimersAsync()
+        await assertion
+        expect(batchGetKeys()).toEqual([KEYS, [MARKER], [MARKER]])
+      })
+    })
+
+    // BatchGetItem takes at most 100 keys. A 253-character domain made of
+    // one-letter labels has 127 labels, so 126 candidates, plus the marker.
+    describe('more than 100 candidates', () => {
+      const labels = (count: number) => Array.from({ length: count }, () => 'a').join('.')
+      const DEEP_DOMAIN = labels(127)
+      const DEEP_CANDIDATES = Array.from({ length: 126 }, (_, i) => labels(127 - i))
+
+      it('is the longest domain normalizeDomain accepts', () => {
+        expect(DEEP_DOMAIN).toHaveLength(253)
+        expect(normalizeDomain(DEEP_DOMAIN)).toBe(DEEP_DOMAIN)
+      })
+
+      it('splits them into requests of at most 100 keys that cover every candidate', async () => {
+        mockLookupTable([])
+        await expect(RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`)).resolves.toBe(false)
+        expect(batchGetKeys().map((batch) => batch.length)).toEqual([100, 27])
+        expect(batchGetKeys().flat()).toEqual([MARKER, ...DEEP_CANDIDATES])
+      })
+
+      it('sends the marker exactly once, in the first request only', async () => {
+        mockLookupTable([])
+        await RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`)
+        const [first, second] = batchGetKeys()
+        expect(first.filter((key) => key === MARKER)).toHaveLength(1)
+        expect(second).not.toContain(MARKER)
+      })
+
+      it('sends the requests in parallel', async () => {
+        let release = () => {}
+        const held = new Promise<void>((resolve) => { release = resolve })
+        mockDynamoDBSend.mockImplementation(async (command: { input: BatchGetInput }) => {
+          await held
+          const requested = command.input.RequestItems[TABLE].Keys.map(({ DomainName }) => DomainName)
+          return { Responses: { [TABLE]: keys(...requested.filter((key) => key === MARKER)) } }
+        })
+        const run = RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`)
+        // Both requests go out before either one answers.
+        await vi.waitFor(() => expect(mockDynamoDBSend).toHaveBeenCalledTimes(2))
+        release()
+        await expect(run).resolves.toBe(false)
+      })
+
+      it('is true when the root, in the last request, is listed', async () => {
+        mockLookupTable(['a.a'])
+        await expect(RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`)).resolves.toBe(true)
+      })
+
+      it('is true when one request finds a listed domain, even if another fails', async () => {
+        mockDynamoDBSend.mockImplementation(async (command: { input: BatchGetInput }) => {
+          const requested = command.input.RequestItems[TABLE].Keys.map(({ DomainName }) => DomainName)
+          if (!requested.includes('a.a')) {
+            throw new Error('ProvisionedThroughputExceededException')
+          }
+          return { Responses: { [TABLE]: keys('a.a') } }
+        })
+        await expect(RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`)).resolves.toBe(true)
+      })
+
+      it('throws when a request fails and no request finds a listed domain', async () => {
+        mockDynamoDBSend.mockImplementation(async (command: { input: BatchGetInput }) => {
+          const requested = command.input.RequestItems[TABLE].Keys.map(({ DomainName }) => DomainName)
+          if (!requested.includes('a.a')) {
+            throw new Error('ProvisionedThroughputExceededException')
+          }
+          return { Responses: { [TABLE]: [] } }
+        })
+        await expect(RestrictedDomains.isRestricted(`user@${DEEP_DOMAIN}`))
+          .rejects.toThrow('ProvisionedThroughputExceededException')
+      })
     })
   })
 
@@ -266,8 +615,9 @@ describe('RestrictedDomains', () => {
       mockMmd(['a.org', 'b.org'])
       mockTable([['b.org', 'old.org']])
       await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })
-      // One Scan, then one BatchWrite.
-      expect(sendClientConfigs()).toEqual([REFRESH_CLIENT_CONFIG, REFRESH_CLIENT_CONFIG])
+      // One Scan, one BatchWrite, then the refresh marker Put.
+      expect(sentCommands()).toEqual(['ScanCommand', 'BatchWriteCommand', 'PutCommand'])
+      expect(sendClientConfigs()).toEqual([REFRESH_CLIENT_CONFIG, REFRESH_CLIENT_CONFIG, REFRESH_CLIENT_CONFIG])
     })
 
     it('writes one item for MMD values that differ only by case or whitespace', async () => {
@@ -415,18 +765,22 @@ describe('RestrictedDomains', () => {
         const assertion = expect(run).rejects.toThrow('25 restricted-domain writes unprocessed after 3 retries')
         await vi.runAllTimersAsync()
         await assertion
-        // 1 send + 3 retries of the first chunk. The second chunk is never sent.
+        // 1 send + 3 retries of the first chunk. The second chunk and the marker
+        // are never sent.
         expect(batchWrites().map((batch) => batch.length)).toEqual([25, 25, 25, 25])
         expect(waits()).toEqual([200, 400, 800])
+        expect(PutCommand).not.toHaveBeenCalled()
       })
     })
 
+    // A guard writes nothing, not even the refresh marker.
     describe('guards (write nothing and throw)', () => {
       it('rejects with the MMD error when the query fails', async () => {
         mmd.query.mockRejectedValue(new Error('connection refused'))
         mockTable([['a.org']])
         await expect(sync()).rejects.toThrow('connection refused')
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
       it('rejects with the DynamoDB error when the Scan fails', async () => {
@@ -434,15 +788,17 @@ describe('RestrictedDomains', () => {
         mockDynamoDBSend.mockRejectedValue(new Error('ResourceNotFoundException'))
         await expect(sync()).rejects.toThrow('ResourceNotFoundException')
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
-      it('refuses when MMD returns no rows', async () => {
+      it('refuses when MMD returns no rows, counting only domains in the table', async () => {
         mockMmd([])
-        mockTable([domains(2165)])
+        mockTable([[MARKER, ...domains(2165)]])
         const run = sync()
         await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
-        await expect(run).rejects.toThrow(/zero-rows guard.*0 valid restricted domains.*2165/)
+        await expect(run).rejects.toThrow(/zero-rows guard.*0 valid restricted domains.*2165\./)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
       it('refuses when MMD returns only null or empty domains', async () => {
@@ -450,6 +806,7 @@ describe('RestrictedDomains', () => {
         mockTable([['a.org']])
         await expect(sync()).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
       it('refuses when every MMD value is invalid, and still logs the skips', async () => {
@@ -460,6 +817,7 @@ describe('RestrictedDomains', () => {
         await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         await expect(run).rejects.toThrow(/zero-rows guard.*0 valid restricted domains.*1\./)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
         expect(warn).toHaveBeenCalledWith(skippedLog(invalid))
       })
 
@@ -468,6 +826,7 @@ describe('RestrictedDomains', () => {
         mockTable([['a.org']])
         await expect(sync({ allowLargeDelete: true })).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
     })
 
@@ -484,6 +843,7 @@ describe('RestrictedDomains', () => {
           /shrink guard.*300 of 2165.*limit of 217.*Applied 2 adds.*skipped all 300 deletes.*allowLargeDelete/
         )
         expect(batchWrites().flat()).toEqual([put('new-a.org'), put('new-b.org')])
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
       it('writes nothing and rejects when there are no adds (2,165 rows, 300 deletes, limit 217)', async () => {
@@ -494,6 +854,7 @@ describe('RestrictedDomains', () => {
         await expect(run).rejects.toBeInstanceOf(RestrictedDomainsSyncError)
         await expect(run).rejects.toThrow(/shrink guard.*300 of 2165.*limit of 217.*Applied 0 adds.*skipped all 300 deletes.*allowLargeDelete/)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
       it('rejects with the write error, not the guard error, when the adds fail', async () => {
@@ -506,14 +867,18 @@ describe('RestrictedDomains', () => {
         await expect(run).rejects.toThrow('ProvisionedThroughputExceededException')
         await expect(run).rejects.not.toBeInstanceOf(RestrictedDomainsSyncError)
         expect(batchWrites().flat()).toEqual([put('new-a.org')])
+        expect(PutCommand).not.toHaveBeenCalled()
       })
 
-      it('writes the adds and the large delete when the event sets allowLargeDelete', async () => {
+      it('writes the adds, the large delete and the marker when the event sets allowLargeDelete', async () => {
         const table = domains(2165)
         mockMmd([...table.slice(300), 'new-a.org'])
         mockTable([table])
         await expect(sync({ allowLargeDelete: true })).resolves.toEqual({ added: 1, removed: 300 })
         expect(batchWrites().flat()).toEqual([put('new-a.org'), ...table.slice(0, 300).map(del)])
+        expect(markerPuts()).toEqual([
+          expect.objectContaining({ Item: expect.objectContaining({ DomainName: MARKER, DomainCount: 1866 }) })
+        ])
       })
 
       it('allows exactly the limit (2,165 rows, 217 deletes)', async () => {
@@ -536,6 +901,70 @@ describe('RestrictedDomains', () => {
         mockTable([table])
         await expect(sync()).rejects.toThrow(/shrink guard.*101 of 150.*limit of 100/)
         expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(PutCommand).not.toHaveBeenCalled()
+      })
+    })
+
+    // The sign-up check denies every sign-up while the marker is missing, so
+    // only a run that wrote everything may write it.
+    describe('refresh marker', () => {
+      const NOW = '2026-11-23T18:00:00.000Z'
+      const marker = (domainCount: number) => ({
+        TableName: TABLE,
+        Item: { DomainName: MARKER, LastSuccessAt: NOW, DomainCount: domainCount }
+      })
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date(NOW))
+      })
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('writes the marker last, after a successful run, with LastSuccessAt and DomainCount', async () => {
+        // MMD gives 3 domains once cleaned and deduplicated.
+        mockMmd(['a.org', ' A.org ', 'b.org', 'c.org'])
+        mockTable([[MARKER, 'a.org', 'old.org']])
+        await expect(sync()).resolves.toEqual({ added: 2, removed: 1 })
+        expect(markerPuts()).toEqual([marker(3)])
+        expect(sentCommands()).toEqual(['ScanCommand', 'BatchWriteCommand', 'PutCommand'])
+      })
+
+      it('writes the marker on a run with no changes', async () => {
+        mockMmd(['a.org', 'b.org'])
+        mockTable([[MARKER, 'a.org', 'b.org']])
+        await expect(sync()).resolves.toEqual({ added: 0, removed: 0 })
+        expect(BatchWriteCommand).not.toHaveBeenCalled()
+        expect(markerPuts()).toEqual([marker(2)])
+      })
+
+      it('skips the marker in the scan, so it is never diffed, deleted or counted', async () => {
+        mockMmd(['a.org', 'b.org'])
+        mockTable([[MARKER, 'a.org', 'old.org']])
+        await expect(sync()).resolves.toEqual({ added: 1, removed: 1 })
+        expect(batchWrites()).toEqual([[put('b.org'), del('old.org')]])
+      })
+
+      it('leaves the marker out of the shrink limit (2,160 domains plus the marker, 217 deletes, limit 216)', async () => {
+        // Counted as a row, the marker would raise the limit to 217 and let this through.
+        const table = domains(2160)
+        mockMmd(table.slice(217))
+        mockTable([[MARKER, ...table]])
+        await expect(sync()).rejects.toThrow(/shrink guard.*217 of 2160.*limit of 216/)
+        expect(PutCommand).not.toHaveBeenCalled()
+      })
+
+      it('fails the run when the marker write fails', async () => {
+        mockMmd(['a.org'])
+        mockDynamoDBSend.mockImplementation(async (command: { _type: string }) => {
+          if (command._type === 'PutCommand') {
+            throw new Error('AccessDeniedException')
+          }
+          return { Items: [{ DomainName: 'a.org' }] }
+        })
+        await expect(sync()).rejects.toThrow('AccessDeniedException')
       })
     })
   })
