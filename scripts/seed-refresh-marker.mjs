@@ -15,8 +15,12 @@ export const REFRESH_MARKER_KEY = '#refresh'
 export const SEEDED_BY = 'scripts/seed-refresh-marker.mjs'
 // Fewer domain rows than this means the table looks empty or wrong (stage and prod hold ~2,165).
 export const MIN_DOMAIN_ROWS = 1000
-// --write needs at least this long before the next scheduled refresh.
-export const MIN_MINUTES_BEFORE_NEXT_RUN = 30
+// --write needs at least this long before the next scheduled refresh, to leave
+// time for the build or promote and one run of the new refresh.
+export const MIN_MINUTES_BEFORE_NEXT_RUN = 60
+// --write waits this long after a scheduled refresh starts. An old-code run may
+// still be scanning, and it deletes a marker written after its scan began.
+export const MIN_MINUTES_AFTER_LAST_RUN = 5
 // The refresh runs on cron(0 0/3 * * ? *): every 3 hours at :00 UTC.
 const SCHEDULE_EVERY_HOURS = 3
 const ENVIRONMENTS = ['stage', 'prod']
@@ -34,6 +38,29 @@ export const nextScheduledRun = (now) => {
     next.setUTCHours(next.getUTCHours() + 1)
   } while (next.getUTCHours() % SCHEDULE_EVERY_HOURS !== 0)
   return next
+}
+
+// The latest scheduled refresh at or before now.
+export const lastScheduledRun = (now) =>
+  new Date(nextScheduledRun(now).getTime() - SCHEDULE_EVERY_HOURS * 60 * 60_000)
+
+// Why --write must wait right now, or null when it may go ahead.
+const writeRefusal = (lastRun, nextRun, minutesSinceLastRun, minutesUntilNextRun) => {
+  if (minutesSinceLastRun < MIN_MINUTES_AFTER_LAST_RUN) {
+    return (
+      `the scheduled refresh at ${lastRun.toISOString()} started ${Math.floor(minutesSinceLastRun)} minutes ago, ` +
+      `under ${MIN_MINUTES_AFTER_LAST_RUN}. An old-code run may still be scanning, and it would delete the marker. ` +
+      'Check for its "Restricted domains refreshed from MMD" log line and try again.'
+    )
+  }
+  if (minutesUntilNextRun < MIN_MINUTES_BEFORE_NEXT_RUN) {
+    return (
+      `the next scheduled refresh (${nextRun.toISOString()}) is ${Math.floor(minutesUntilNextRun)} minutes away, ` +
+      `under ${MIN_MINUTES_BEFORE_NEXT_RUN}. The old refresh code deletes the marker, and the new code must be ` +
+      'deployed and run before that refresh. Wait until just after it finishes.'
+    )
+  }
+  return null
 }
 
 const clientRegion = async (client) => {
@@ -92,13 +119,16 @@ export const seedRefreshMarker = async (args, now, client) => {
   }
 
   const table = tableName(options.env)
+  const lastRun = lastScheduledRun(now)
   const nextRun = nextScheduledRun(now)
+  const minutesSinceLastRun = (now.getTime() - lastRun.getTime()) / 60_000
   const minutesUntilNextRun = (nextRun.getTime() - now.getTime()) / 60_000
 
   console.log(`Mode:                 ${options.write ? 'WRITE' : 'dry run'}`)
   console.log(`Table:                ${table}`)
   console.log(`Region:               ${await clientRegion(client)}`)
   console.log(`Now (UTC):            ${now.toISOString()}`)
+  console.log(`Last scheduled run:   ${lastRun.toISOString()} (${Math.floor(minutesSinceLastRun)} minutes ago)`)
   console.log(`Next scheduled run:   ${nextRun.toISOString()} (${Math.floor(minutesUntilNextRun)} minutes away)`)
 
   const domainCount = await countDomainRows(client, table)
@@ -122,22 +152,18 @@ export const seedRefreshMarker = async (args, now, client) => {
     DomainCount: domainCount,
     SeededBy: SEEDED_BY
   }
-  const tooClose = minutesUntilNextRun < MIN_MINUTES_BEFORE_NEXT_RUN
-  const tooCloseReason =
-    `the next scheduled refresh (${nextRun.toISOString()}) is ${Math.floor(minutesUntilNextRun)} minutes away, ` +
-    `under ${MIN_MINUTES_BEFORE_NEXT_RUN}. The old refresh code deletes the marker, and the new code must be ` +
-    'deployed and run before that refresh. Wait until just after it finishes.'
+  const refusal = writeRefusal(lastRun, nextRun, minutesSinceLastRun, minutesUntilNextRun)
 
   if (!options.write) {
     console.log(`Dry run: with --write this would put ${JSON.stringify(item)}`)
-    if (tooClose) {
-      console.log(`--write would be refused right now: ${tooCloseReason}`)
+    if (refusal) {
+      console.log(`--write would be refused right now: ${refusal}`)
     }
     return 0
   }
 
-  if (tooClose) {
-    console.error(`Refusing to write: ${tooCloseReason}`)
+  if (refusal) {
+    console.error(`Refusing to write: ${refusal}`)
     return 1
   }
 

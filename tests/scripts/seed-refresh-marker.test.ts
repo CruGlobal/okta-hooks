@@ -29,10 +29,12 @@ type Item = Record<string, unknown>
 type Command = { _type: string, input: Record<string, unknown> }
 
 const TABLE = 'okta-hooks-prod-restricted-domains'
-// Next scheduled run 06:00 UTC, 175 minutes away.
+// 5 minutes after the 03:00 UTC run, 175 minutes before the 06:00 UTC run.
 const SAFE_NOW = new Date('2026-11-24T03:05:00.000Z')
 // Next scheduled run 06:00 UTC, 25 minutes away.
 const TOO_CLOSE_NOW = new Date('2026-11-24T05:35:00.000Z')
+// The 03:00 UTC run started 2 minutes ago and may still be scanning.
+const JUST_AFTER_NOW = new Date('2026-11-24T03:02:00.000Z')
 
 const client = { send: mockDynamoDBSend, config: { region: async () => 'us-east-1' } }
 
@@ -165,25 +167,52 @@ describe('seed-refresh-marker script', () => {
     expect(puts()[0].Item.DomainCount).toBe(1300)
   })
 
-  it('--write refuses when the next scheduled refresh is under 30 minutes away', async () => {
+  it('--write refuses when the next scheduled refresh is under 60 minutes away', async () => {
     expect(await seedRefreshMarker(['--env', 'prod', '--write'], TOO_CLOSE_NOW, client)).toBe(1)
 
     expect(puts()).toEqual([])
     expect(output(error)).toContain('Refusing to write')
-    expect(output(error)).toContain('25 minutes away, under 30')
+    expect(output(error)).toContain('25 minutes away, under 60')
   })
 
-  it('--write is allowed at exactly 30 minutes', async () => {
-    expect(
-      await seedRefreshMarker(['--env', 'prod', '--write'], new Date('2026-11-24T05:30:00.000Z'), client)
-    ).toBe(0)
-    expect(puts()).toHaveLength(1)
+  it.each([
+    ['refuses just under 60 minutes before the next run', '2026-11-24T05:00:00.001Z', 1],
+    ['allows exactly 60 minutes before the next run', '2026-11-24T05:00:00.000Z', 0]
+  ])('--write %s', async (_label, now, code) => {
+    expect(await seedRefreshMarker(['--env', 'prod', '--write'], new Date(now), client)).toBe(code)
+    expect(puts()).toHaveLength(code === 0 ? 1 : 0)
   })
 
-  it('dry run under 30 minutes still writes nothing and says --write would be refused', async () => {
-    expect(await seedRefreshMarker(['--env', 'prod'], TOO_CLOSE_NOW, client)).toBe(0)
+  it('--write refuses in the first 5 minutes after a scheduled run', async () => {
+    expect(await seedRefreshMarker(['--env', 'prod', '--write'], JUST_AFTER_NOW, client)).toBe(1)
+
+    expect(puts()).toEqual([])
+    expect(output(error)).toContain('Refusing to write')
+    expect(output(error)).toContain('2026-11-24T03:00:00.000Z started 2 minutes ago, under 5')
+  })
+
+  it.each([
+    ['refuses at the scheduled run itself', '2026-11-24T03:00:00.000Z', 1],
+    ['refuses just under 5 minutes after the run', '2026-11-24T03:04:59.999Z', 1],
+    ['allows exactly 5 minutes after the run', '2026-11-24T03:05:00.000Z', 0],
+    ['does not treat a non-scheduled hour as a run', '2026-11-24T04:01:00.000Z', 0]
+  ])('--write %s', async (_label, now, code) => {
+    expect(await seedRefreshMarker(['--env', 'prod', '--write'], new Date(now), client)).toBe(code)
+    expect(puts()).toHaveLength(code === 0 ? 1 : 0)
+  })
+
+  it.each([
+    ['under 60 minutes before the next run', TOO_CLOSE_NOW],
+    ['in the first 5 minutes after a run', JUST_AFTER_NOW]
+  ])('dry run %s still writes nothing and says --write would be refused', async (_label, now) => {
+    expect(await seedRefreshMarker(['--env', 'prod'], now, client)).toBe(0)
     expect(puts()).toEqual([])
     expect(output(log)).toContain('--write would be refused right now')
+  })
+
+  it('prints the last scheduled run and how long ago it started', async () => {
+    await seedRefreshMarker(['--env', 'prod'], SAFE_NOW, client)
+    expect(output(log)).toContain('2026-11-24T03:00:00.000Z (5 minutes ago)')
   })
 
   it.each([[[]], [['--write']]])('aborts under 1,000 domain rows (extra args %j)', async (extra) => {

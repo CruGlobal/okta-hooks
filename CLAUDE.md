@@ -102,10 +102,12 @@ For a deliberate large removal, send the payload `'{"allowLargeDelete": true}'`
 instead of `'{}'`.
 
 **Rollout: invoke the refresh right after the first deploy.** A table holds no
-marker until a refresh run by this code succeeds. After this code first reaches
-an environment (a stage candidate, then a prod promote), run the refresh once
-right away with the command above. Until a run succeeds, every sign-up gets the
-"try again" DENY, and the next scheduled run can be up to 3 hours away.
+marker until it is seeded or a refresh run by this code succeeds. Seed it first,
+as "Rollout: seed the refresh marker" below says, so there is no deny window.
+Without a marker, every sign-up gets the "try again" DENY from the moment this
+code reaches an environment (a stage candidate, then a prod promote) until a
+run succeeds, and the next scheduled run can be up to 3 hours away. Either way,
+run the refresh once right after the deploy with the command above.
 
 **Rollout: the first refresh may hold back deletes.** Before the MMD refresh, the
 table held the Google Sheet's rows. The first refresh writes every domain MMD
@@ -134,11 +136,12 @@ run of the new refresh before the next. Stage first, then prod. For each one:
    cru app impersonate -n okta-hooks -e staging -- node scripts/seed-refresh-marker.mjs --env stage --write
    ```
 
-   For prod, use `-e production` and `--env prod`. The script prints the next
-   scheduled run and stops if the table has fewer than 1,000 domain rows. It
-   never overwrites a marker, and `--write` refuses when the next scheduled run
-   is under 30 minutes away.
-2. Deploy #135.
+   For prod, use `-e production` and `--env prod`. The script prints the last
+   and next scheduled runs and stops if the table has fewer than 1,000 domain
+   rows. It never overwrites a marker. `--write` refuses in the first 5 minutes
+   after a scheduled run (it may still be scanning) and when the next one is
+   under 60 minutes away.
+2. Deploy #135. Start right after seeding.
    - Stage: merge #135 only now, never before step 1 is done on stage, or the
      05:00 UTC nightly build could deploy it to a table with no marker. Then
      `cru app build -n okta-hooks --yes`, and wait until
