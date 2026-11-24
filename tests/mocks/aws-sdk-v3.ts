@@ -26,3 +26,4 @@ export const BatchGetCommand = vi.fn().mockImplementation(function (input) { ret
 export const ScanCommand = vi.fn().mockImplementation(function (input) { return { _type: 'ScanCommand', input } })
 export const BatchWriteCommand = vi.fn().mockImplementation(function (input) { return { _type: 'BatchWriteCommand', input } })
 export const PutCommand = vi.fn().mockImplementation(function (input) { return { _type: 'PutCommand', input } })
+export const GetCommand = vi.fn().mockImplementation(function (input) { return { _type: 'GetCommand', input } })

@@ -118,6 +118,46 @@ Compare the table with MMD, then invoke `sync_restricted_domains` once with the
 event `{"allowLargeDelete": true}` to apply the deletes. That run writes the
 marker. Scheduled runs work on their own after that.
 
+**Rollout: seed the refresh marker.** Seeding the marker before the deploy means
+no sign-up is ever denied for a missing marker. The refresh deployed before
+#135 deletes every table key MMD lacks, so its next run deletes a `#refresh`
+item. It runs every 3 hours at :00 UTC (`cron(0 0/3 * * ? *)`: 00:00, 03:00,
+and so on). So seed right after one scheduled run, and finish the deploy and one
+run of the new refresh before the next. Stage first, then prod. For each one:
+
+1. Right after a scheduled run at HH:00 UTC, check its log line
+   `Restricted domains refreshed from MMD` (the old run has finished). Then dry
+   run, then write:
+
+   ```bash
+   cru app impersonate -n okta-hooks -e staging -- node scripts/seed-refresh-marker.mjs --env stage
+   cru app impersonate -n okta-hooks -e staging -- node scripts/seed-refresh-marker.mjs --env stage --write
+   ```
+
+   For prod, use `-e production` and `--env prod`. The script prints the next
+   scheduled run and stops if the table has fewer than 1,000 domain rows. It
+   never overwrites a marker, and `--write` refuses when the next scheduled run
+   is under 30 minutes away.
+2. Deploy #135.
+   - Stage: merge #135 only now, never before step 1 is done on stage, or the
+     05:00 UTC nightly build could deploy it to a table with no marker. Then
+     `cru app build -n okta-hooks --yes`, and wait until
+     `cru app status -n okta-hooks` shows the new candidate on stage.
+   - Prod: `cru app promote -n okta-hooks`, and wait for it to finish.
+3. Run the new refresh once:
+
+   ```bash
+   cru app impersonate -n okta-hooks -e staging -- aws lambda invoke --function-name okta-hooks-stage-sync_restricted_domains --payload '{}' --cli-binary-format raw-in-base64-out out.json
+   ```
+
+   For prod, use `-e production` and `okta-hooks-prod-sync_restricted_domains`.
+   Then run the step 1 dry run again. It prints the marker: `LastSuccessAt`
+   should be later than the seed, and `SeededBy` should be gone (the refresh's
+   PutItem replaces the whole item).
+4. Do steps 1 to 3 before the next HH:00 UTC run. If an old-code run gets in
+   between, it deletes the seed, and sign-ups are denied from the deploy until
+   step 3 writes the marker.
+
 ## Global Registry access is scoped by credential
 
 A GR bearer token grants visibility into the entities its client system is
